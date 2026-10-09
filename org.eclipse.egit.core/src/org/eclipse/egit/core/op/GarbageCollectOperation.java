@@ -22,6 +22,7 @@ import org.eclipse.egit.core.internal.job.RuleUtil;
 import org.eclipse.jgit.api.GarbageCollectCommand;
 import org.eclipse.jgit.api.errors.GitAPIException;
 import org.eclipse.jgit.lib.Repository;
+import org.eclipse.jgit.util.Trace2;
 
 /**
  * Operation to garbage collect a git repository
@@ -42,6 +43,14 @@ public class GarbageCollectOperation implements IEGitOperation {
 	 */
 	@Override
 	public void execute(IProgressMonitor monitor) throws CoreException {
+		try (Trace2.Scope trace = Trace2.getInstance().region(null, "egit", //$NON-NLS-1$
+				"GarbageCollectOperation")) { //$NON-NLS-1$
+			executeWithTrace(monitor);
+		}
+	}
+
+	private void executeWithTrace(IProgressMonitor monitor)
+			throws CoreException {
 		try {
 			GarbageCollectCommand gc = RepositoryUtil
 					.getGarbageCollectCommand(repository);

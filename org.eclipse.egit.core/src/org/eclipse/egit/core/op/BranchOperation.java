@@ -62,6 +62,7 @@ import org.eclipse.jgit.treewalk.filter.AndTreeFilter;
 import org.eclipse.jgit.treewalk.filter.PathSuffixFilter;
 import org.eclipse.jgit.treewalk.filter.TreeFilter;
 import org.eclipse.jgit.util.FileUtils;
+import org.eclipse.jgit.util.Trace2;
 
 /**
  * This class implements checkouts of a specific revision. A check is made that
@@ -117,6 +118,14 @@ public class BranchOperation implements IEGitOperation {
 
 	@Override
 	public void execute(IProgressMonitor m) throws CoreException {
+		try (Trace2.Scope trace = Trace2.getInstance().region(null, "egit", //$NON-NLS-1$
+				"BranchOperation")) { //$NON-NLS-1$
+			executeWithTrace(m);
+		}
+	}
+
+	private void executeWithTrace(IProgressMonitor m)
+			throws CoreException {
 		IWorkspaceRunnable action = new IWorkspaceRunnable() {
 
 			@Override

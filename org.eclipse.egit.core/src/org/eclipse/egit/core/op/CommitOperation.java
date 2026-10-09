@@ -53,6 +53,7 @@ import org.eclipse.jgit.lib.RepositoryState;
 import org.eclipse.jgit.revwalk.RevCommit;
 import org.eclipse.jgit.revwalk.RevWalk;
 import org.eclipse.jgit.util.RawParseUtils;
+import org.eclipse.jgit.util.Trace2;
 import org.eclipse.osgi.util.NLS;
 import org.eclipse.team.core.TeamException;
 
@@ -194,6 +195,14 @@ public class CommitOperation implements IEGitOperation {
 
 	@Override
 	public void execute(IProgressMonitor monitor) throws CoreException {
+		try (Trace2.Scope trace = Trace2.getInstance().region(null, "egit", //$NON-NLS-1$
+				"CommitOperation")) { //$NON-NLS-1$
+			executeWithTrace(monitor);
+		}
+	}
+
+	private void executeWithTrace(IProgressMonitor monitor)
+			throws CoreException {
 		IWorkspaceRunnable action = new IWorkspaceRunnable() {
 
 			@Override

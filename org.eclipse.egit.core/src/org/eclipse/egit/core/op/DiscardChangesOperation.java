@@ -44,6 +44,7 @@ import org.eclipse.jgit.api.Git;
 import org.eclipse.jgit.api.errors.GitAPIException;
 import org.eclipse.jgit.api.errors.JGitInternalException;
 import org.eclipse.jgit.lib.Repository;
+import org.eclipse.jgit.util.Trace2;
 
 /**
  * The operation discards changes on a set of resources (checkout with paths).
@@ -192,6 +193,14 @@ public class DiscardChangesOperation implements IEGitOperation {
 
 	@Override
 	public void execute(IProgressMonitor m) throws CoreException {
+		try (Trace2.Scope trace = Trace2.getInstance().region(null, "egit", //$NON-NLS-1$
+				"DiscardChangesOperation")) { //$NON-NLS-1$
+			executeWithTrace(m);
+		}
+	}
+
+	private void executeWithTrace(IProgressMonitor m)
+			throws CoreException {
 		IWorkspaceRunnable action = new IWorkspaceRunnable() {
 			@Override
 			public void run(IProgressMonitor actMonitor) throws CoreException {

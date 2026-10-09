@@ -24,6 +24,7 @@ import org.eclipse.jgit.lib.Ref;
 import org.eclipse.jgit.lib.Repository;
 import org.eclipse.jgit.transport.CredentialsProvider;
 import org.eclipse.jgit.transport.URIish;
+import org.eclipse.jgit.util.Trace2;
 
 /**
  * Operation of listing remote repository advertised refs.
@@ -108,6 +109,14 @@ public class ListRemoteOperation {
 	 * @throws InterruptedException
 	 */
 	public void run(IProgressMonitor pm) throws InvocationTargetException,
+			InterruptedException {
+		try (Trace2.Scope trace = Trace2.getInstance().region(null, "egit", //$NON-NLS-1$
+				"ListRemoteOperation")) { //$NON-NLS-1$
+			runWithTrace(pm);
+		}
+	}
+
+	private void runWithTrace(IProgressMonitor pm) throws InvocationTargetException,
 			InterruptedException {
 		if (pm != null)
 			pm.beginTask(CoreText.ListRemoteOperation_title,

@@ -34,6 +34,7 @@ import org.eclipse.jgit.transport.CredentialsProvider;
 import org.eclipse.jgit.transport.RemoteConfig;
 import org.eclipse.jgit.transport.URIish;
 import org.eclipse.jgit.util.SshSupport;
+import org.eclipse.jgit.util.Trace2;
 
 /**
  * Configure Gerrit if repository was cloned from a Gerrit server
@@ -120,6 +121,14 @@ public class ConfigureGerritAfterCloneTask implements PostCloneTask {
 
 	@Override
 	public void execute(Repository repository, IProgressMonitor monitor)
+			throws CoreException {
+		try (Trace2.Scope trace = Trace2.getInstance().region(null, "egit", //$NON-NLS-1$
+				"ConfigureGerritAfterCloneTask")) { //$NON-NLS-1$
+			executeWithTrace(repository, monitor);
+		}
+	}
+
+	private void executeWithTrace(Repository repository, IProgressMonitor monitor)
 			throws CoreException {
 		try {
 			if (isGerrit(repository)) {

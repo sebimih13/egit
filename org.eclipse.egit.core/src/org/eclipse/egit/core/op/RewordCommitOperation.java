@@ -54,6 +54,7 @@ import org.eclipse.jgit.revwalk.RevSort;
 import org.eclipse.jgit.revwalk.RevWalk;
 import org.eclipse.jgit.transport.CredentialsProvider;
 import org.eclipse.jgit.util.ChangeIdUtil;
+import org.eclipse.jgit.util.Trace2;
 import org.eclipse.team.core.TeamException;
 
 /** An operation that rewords a commit's message. */
@@ -91,6 +92,14 @@ public class RewordCommitOperation implements IEGitOperation {
 
 	@Override
 	public void execute(IProgressMonitor monitor) throws CoreException {
+		try (Trace2.Scope trace = Trace2.getInstance().region(null, "egit", //$NON-NLS-1$
+				"RewordCommitOperation")) { //$NON-NLS-1$
+			executeWithTrace(monitor);
+		}
+	}
+
+	private void executeWithTrace(IProgressMonitor monitor)
+			throws CoreException {
 		try (RevWalk walk = new RevWalk(repository)) {
 			// Lock the index. We don't touch the index, but this guards against
 			// most other operations that might interfere with the in-memory

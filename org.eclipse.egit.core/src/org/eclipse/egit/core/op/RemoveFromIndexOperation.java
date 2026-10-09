@@ -34,6 +34,7 @@ import org.eclipse.jgit.api.RmCommand;
 import org.eclipse.jgit.api.errors.GitAPIException;
 import org.eclipse.jgit.lib.Ref;
 import org.eclipse.jgit.lib.Repository;
+import org.eclipse.jgit.util.Trace2;
 
 /**
  * Remove from Git Index operation (unstage).
@@ -53,6 +54,14 @@ public class RemoveFromIndexOperation implements IEGitOperation {
 
 	@Override
 	public void execute(IProgressMonitor m) throws CoreException {
+		try (Trace2.Scope trace = Trace2.getInstance().region(null, "egit", //$NON-NLS-1$
+				"RemoveFromIndexOperation")) { //$NON-NLS-1$
+			executeWithTrace(m);
+		}
+	}
+
+	private void executeWithTrace(IProgressMonitor m)
+			throws CoreException {
 		IProgressMonitor monitor = (m != null) ? m : new NullProgressMonitor();
 
 		monitor.beginTask(

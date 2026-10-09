@@ -62,6 +62,7 @@ import org.eclipse.jgit.lib.Repository;
 import org.eclipse.jgit.lib.StoredConfig;
 import org.eclipse.jgit.merge.MergeStrategy;
 import org.eclipse.jgit.transport.CredentialsProvider;
+import org.eclipse.jgit.util.Trace2;
 
 /**
  * Wraps the JGit API {@link PullCommand} into an operation
@@ -162,6 +163,14 @@ public class PullOperation implements IEGitOperation {
 
 	@Override
 	public void execute(IProgressMonitor m) throws CoreException {
+		try (Trace2.Scope trace = Trace2.getInstance().region(null, "egit", //$NON-NLS-1$
+				"PullOperation")) { //$NON-NLS-1$
+			executeWithTrace(m);
+		}
+	}
+
+	private void executeWithTrace(IProgressMonitor m)
+			throws CoreException {
 		if (!results.isEmpty()) {
 			throw new CoreException(
 					new Status(IStatus.ERROR, Activator.PLUGIN_ID,

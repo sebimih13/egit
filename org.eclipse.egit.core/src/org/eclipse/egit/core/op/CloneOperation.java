@@ -38,6 +38,7 @@ import org.eclipse.jgit.transport.CredentialsProvider;
 import org.eclipse.jgit.transport.TagOpt;
 import org.eclipse.jgit.transport.URIish;
 import org.eclipse.jgit.util.FileUtils;
+import org.eclipse.jgit.util.Trace2;
 import org.eclipse.osgi.util.NLS;
 
 /**
@@ -137,6 +138,14 @@ public class CloneOperation {
 	 * @throws InterruptedException
 	 */
 	public void run(final IProgressMonitor monitor)
+			throws InvocationTargetException, InterruptedException {
+		try (Trace2.Scope trace = Trace2.getInstance().region(null, "egit", //$NON-NLS-1$
+				"CloneOperation")) { //$NON-NLS-1$
+			runWithTrace(monitor);
+		}
+	}
+
+	private void runWithTrace(final IProgressMonitor monitor)
 			throws InvocationTargetException, InterruptedException {
 		String title = NLS.bind(CoreText.CloneOperation_title, uri);
 		SubMonitor progress = SubMonitor.convert(monitor, title,

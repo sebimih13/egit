@@ -40,6 +40,7 @@ import org.eclipse.jgit.api.errors.JGitInternalException;
 import org.eclipse.jgit.lib.Ref;
 import org.eclipse.jgit.lib.Repository;
 import org.eclipse.jgit.merge.MergeStrategy;
+import org.eclipse.jgit.util.Trace2;
 
 /**
  * This class implements rebase.
@@ -129,6 +130,14 @@ public class RebaseOperation implements IEGitOperation {
 
 	@Override
 	public void execute(IProgressMonitor m) throws CoreException {
+		try (Trace2.Scope trace = Trace2.getInstance().region(null, "egit", //$NON-NLS-1$
+				"RebaseOperation")) { //$NON-NLS-1$
+			executeWithTrace(m);
+		}
+	}
+
+	private void executeWithTrace(IProgressMonitor m)
+			throws CoreException {
 		if (result != null)
 			throw new CoreException(new Status(IStatus.ERROR,
 					Activator.PLUGIN_ID, CoreText.OperationAlreadyExecuted));
