@@ -73,6 +73,7 @@ import org.eclipse.jgit.treewalk.TreeWalk;
 import org.eclipse.jgit.treewalk.WorkingTreeIterator;
 import org.eclipse.jgit.treewalk.filter.InterIndexDiffFilter;
 import org.eclipse.jgit.treewalk.filter.PathFilterGroup;
+import org.eclipse.jgit.util.Trace2;
 import org.eclipse.osgi.util.NLS;
 
 /**
@@ -559,6 +560,28 @@ public class IndexDiffCacheEntry {
 			String jobName, Repository repository,
 			Collection<String> filesToUpdate,
 			Collection<IResource> resourcesToUpdate) throws IOException {
+		try (Trace2.Scope trace = Trace2.getInstance().command(repository,
+				"status", "egit.indexdiff.incremental")) { //$NON-NLS-1$ //$NON-NLS-2$
+			try {
+				IndexDiffData result = calcIndexDiffDataIncrementalWithTrace(monitor, jobName, repository,
+						filesToUpdate, resourcesToUpdate);
+				if (trace.isEnabled()) {
+					trace.data("outcome", monitor.isCanceled() || result == null //$NON-NLS-1$
+							? "cancelled" : "ok"); //$NON-NLS-1$ //$NON-NLS-2$
+				}
+				return result;
+			} catch (IOException | RuntimeException e) {
+				trace.data("outcome", "error"); //$NON-NLS-1$ //$NON-NLS-2$
+				throw e;
+			}
+		}
+	}
+
+	private IndexDiffData calcIndexDiffDataIncrementalWithTrace(IProgressMonitor monitor,
+			String jobName, Repository repository,
+			Collection<String> filesToUpdate,
+			Collection<IResource> resourcesToUpdate)
+			throws IOException {
 		if (indexDiffData == null)
 			// Incremental update not possible without prior indexDiffData
 			// -> do full refresh instead
@@ -620,6 +643,25 @@ public class IndexDiffCacheEntry {
 	}
 
 	private IndexDiffData calcIndexDiffDataFull(IProgressMonitor monitor,
+			String jobName, Repository repository)
+			throws IOException {
+		try (Trace2.Scope trace = Trace2.getInstance().command(repository,
+				"status", "egit.indexdiff.full")) { //$NON-NLS-1$ //$NON-NLS-2$
+			try {
+				IndexDiffData result = calcIndexDiffDataFullWithTrace(monitor, jobName, repository);
+				if (trace.isEnabled()) {
+					trace.data("outcome", monitor.isCanceled() || result == null //$NON-NLS-1$
+							? "cancelled" : "ok"); //$NON-NLS-1$ //$NON-NLS-2$
+				}
+				return result;
+			} catch (IOException | RuntimeException e) {
+				trace.data("outcome", "error"); //$NON-NLS-1$ //$NON-NLS-2$
+				throw e;
+			}
+		}
+	}
+
+	private IndexDiffData calcIndexDiffDataFullWithTrace(IProgressMonitor monitor,
 			String jobName, Repository repository)
 			throws IOException {
 		EclipseGitProgressTransformer jgitMonitor = new EclipseGitProgressTransformer(

@@ -18,6 +18,7 @@ import org.eclipse.jgit.lib.Repository;
 import org.eclipse.jgit.transport.RefSpec;
 import org.eclipse.jgit.transport.RemoteConfig;
 import org.eclipse.jgit.transport.URIish;
+import org.eclipse.jgit.util.Trace2;
 
 /**
  * Configures the push specification of the cloned repository
@@ -48,6 +49,14 @@ public class ConfigurePushAfterCloneTask implements PostCloneTask {
 	 */
 	@Override
 	public void execute(Repository repository, IProgressMonitor monitor)
+			throws CoreException {
+		try (Trace2.Scope trace = Trace2.getInstance().region(null, "egit", //$NON-NLS-1$
+				"ConfigurePushAfterCloneTask")) { //$NON-NLS-1$
+			executeWithTrace(repository, monitor);
+		}
+	}
+
+	private void executeWithTrace(Repository repository, IProgressMonitor monitor)
 			throws CoreException {
 		try {
 			RemoteConfig configToUse = new RemoteConfig(

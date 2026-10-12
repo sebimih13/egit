@@ -44,6 +44,7 @@ import org.eclipse.jgit.transport.RemoteRefUpdate.Status;
 import org.eclipse.jgit.transport.Transport;
 import org.eclipse.jgit.transport.URIish;
 import org.eclipse.jgit.util.SystemReader;
+import org.eclipse.jgit.util.Trace2;
 import org.eclipse.osgi.util.NLS;
 
 /**
@@ -207,6 +208,14 @@ public class PushOperation {
 	 *             {@link #getOperationResult()})
 	 */
 	public void run(IProgressMonitor actMonitor)
+			throws InvocationTargetException {
+		try (Trace2.Scope trace = Trace2.getInstance().region(null, "egit", //$NON-NLS-1$
+				"PushOperation")) { //$NON-NLS-1$
+			runWithTrace(actMonitor);
+		}
+	}
+
+	private void runWithTrace(IProgressMonitor actMonitor)
 			throws InvocationTargetException {
 
 		if (operationResult != null)
