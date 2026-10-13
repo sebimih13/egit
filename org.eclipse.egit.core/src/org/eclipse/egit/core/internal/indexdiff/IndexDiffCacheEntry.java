@@ -93,6 +93,8 @@ public class IndexDiffCacheEntry {
 
 	private volatile IndexDiffData indexDiffData;
 
+	private volatile boolean disposed;
+
 	private IndexDiffReloadJob reloadJob;
 
 	private IndexDiffUpdateJob updateJob;
@@ -129,6 +131,9 @@ public class IndexDiffCacheEntry {
 	private IResourceChangeListener resourceChangeListener;
 
 	private final FsMonitor.State fsMonitor = new FsMonitor.State();
+
+	// Guarded by fsMonitor; committed only with its corresponding result.
+	private FsMonitor.Probe pendingFsMonitorProbe;
 
 	private static Semaphore parallelism = new Semaphore(2);
 
@@ -402,10 +407,9 @@ public class IndexDiffCacheEntry {
 					}
 					IndexDiffData result = calcIndexDiffDataFull(monitor,
 							getName(), repository);
-					if (monitor.isCanceled() || (result == null)) {
+					if (!publishIndexDiffData(result, monitor)) {
 						return Status.CANCEL_STATUS;
 					}
-					indexDiffData = result;
 					if (GitTraceLocation.INDEXDIFFCACHE.isActive()) {
 						long time = System.currentTimeMillis() - startTime;
 						StringBuilder message = new StringBuilder(
@@ -507,10 +511,9 @@ public class IndexDiffCacheEntry {
 					}
 					IndexDiffData result = calcIndexDiffDataIncremental(monitor,
 							getName(), repository, files, resources);
-					if (monitor.isCanceled() || (result == null)) {
+					if (!publishIndexDiffData(result, monitor)) {
 						return Status.CANCEL_STATUS;
 					}
-					indexDiffData = result;
 					if (GitTraceLocation.INDEXDIFFCACHE.isActive()) {
 						long time = System.currentTimeMillis() - startTime;
 						StringBuilder message = new StringBuilder(
@@ -564,7 +567,7 @@ public class IndexDiffCacheEntry {
 			Collection<String> filesToUpdate,
 			Collection<IResource> resourcesToUpdate) throws IOException {
 		// Partial cache updates cannot retain a full-scan token.
-		fsMonitor.clear();
+		clearFsMonitor();
 		try (Trace2.Scope trace = Trace2.getInstance().command(repository,
 				"status", "egit.indexdiff.incremental")) { //$NON-NLS-1$ //$NON-NLS-2$
 			try {
@@ -604,6 +607,9 @@ public class IndexDiffCacheEntry {
 				return null; // workspace is closed
 			IndexDiff diffForChangedResources = new IndexDiff(repository,
 					Constants.HEAD, iterator);
+			if (FsMonitor.isEnabled(repository)) {
+				diffForChangedResources.setForceContentCheckPaths(treeFilterPaths);
+			}
 			diffForChangedResources.setFilter(
 					PathFilterGroup.createFromStrings(treeFilterPaths));
 			diffForChangedResources.diff(jgitMonitor, 0, 0, jobName,
@@ -671,34 +677,57 @@ public class IndexDiffCacheEntry {
 			throws IOException {
 		if (FsMonitor.isEnabled(repository) && !monitor.isCanceled()) {
 			synchronized (fsMonitor) {
+				pendingFsMonitorProbe = null;
 				FsMonitor.Probe probe = fsMonitor.query(repository);
 				IndexDiffData previous = indexDiffData;
 				if (probe != null && probe.isUnchanged() && previous != null
 						&& !monitor.isCanceled()) {
-					fsMonitor.remember(probe);
+					pendingFsMonitorProbe = probe;
 					return previous;
 				}
 				try {
 					IndexDiffData result = scanIndexDiffDataFull(monitor,
-							jobName, repository);
+							jobName, repository, fsMonitor.requiresFullContentCheck() || probe != null && previous == null ? List.of("/") //$NON-NLS-1$
+									: probe != null ? probe.getChangedPaths() : List.of());
 					if (result != null && !monitor.isCanceled()) {
-						fsMonitor.remember(probe);
+						pendingFsMonitorProbe = probe;
 					} else {
-						fsMonitor.clear();
+						clearFsMonitor();
 					}
 					return result;
 				} catch (IOException | RuntimeException | Error failure) {
-					fsMonitor.clear();
+					clearFsMonitor();
 					throw failure;
 				}
 			}
 		}
-		fsMonitor.clear();
-		return scanIndexDiffDataFull(monitor, jobName, repository);
+		clearFsMonitor();
+		return scanIndexDiffDataFull(monitor, jobName, repository, List.of());
+	}
+
+	private void clearFsMonitor() {
+		synchronized (fsMonitor) {
+			fsMonitor.clear();
+			pendingFsMonitorProbe = null;
+		}
+	}
+
+	private boolean publishIndexDiffData(IndexDiffData result,
+			IProgressMonitor monitor) {
+		synchronized (fsMonitor) {
+			if (disposed || result == null || monitor.isCanceled()) {
+				clearFsMonitor();
+				return false;
+			}
+			indexDiffData = result;
+			fsMonitor.remember(pendingFsMonitorProbe);
+			pendingFsMonitorProbe = null;
+			return true;
+		}
 	}
 
 	private IndexDiffData scanIndexDiffDataFull(IProgressMonitor monitor,
-			String jobName, Repository repository)
+			String jobName, Repository repository, List<String> checkPaths)
 			throws IOException {
 		EclipseGitProgressTransformer jgitMonitor = new EclipseGitProgressTransformer(
 				monitor);
@@ -710,6 +739,7 @@ public class IndexDiffCacheEntry {
 				return null; // workspace is closed
 			IndexDiff newDiff = new IndexDiff(repository, Constants.HEAD,
 					iterator);
+			newDiff.setForceContentCheckPaths(checkPaths);
 			newDiff.diff(jgitMonitor, 0, 0, jobName,
 					() -> RepositoryCache.INSTANCE.getBuilder(true, true));
 			return new IndexDiffData(newDiff);
@@ -819,7 +849,8 @@ public class IndexDiffCacheEntry {
 	 * are canceled.
 	 */
 	public void dispose() {
-		fsMonitor.clear();
+		disposed = true;
+		clearFsMonitor();
 		for (ListenerHandle h : listenerHandles) {
 			h.remove();
 		}
