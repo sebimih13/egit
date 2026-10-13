@@ -73,6 +73,7 @@ import org.eclipse.jgit.treewalk.TreeWalk;
 import org.eclipse.jgit.treewalk.WorkingTreeIterator;
 import org.eclipse.jgit.treewalk.filter.InterIndexDiffFilter;
 import org.eclipse.jgit.treewalk.filter.PathFilterGroup;
+import org.eclipse.jgit.util.FsMonitor;
 import org.eclipse.jgit.util.Trace2;
 import org.eclipse.osgi.util.NLS;
 
@@ -126,6 +127,8 @@ public class IndexDiffCacheEntry {
 	};
 
 	private IResourceChangeListener resourceChangeListener;
+
+	private final FsMonitor.State fsMonitor = new FsMonitor.State();
 
 	private static Semaphore parallelism = new Semaphore(2);
 
@@ -560,6 +563,8 @@ public class IndexDiffCacheEntry {
 			String jobName, Repository repository,
 			Collection<String> filesToUpdate,
 			Collection<IResource> resourcesToUpdate) throws IOException {
+		// Partial cache updates cannot retain a full-scan token.
+		fsMonitor.clear();
 		try (Trace2.Scope trace = Trace2.getInstance().command(repository,
 				"status", "egit.indexdiff.incremental")) { //$NON-NLS-1$ //$NON-NLS-2$
 			try {
@@ -661,7 +666,38 @@ public class IndexDiffCacheEntry {
 		}
 	}
 
-	private IndexDiffData calcIndexDiffDataFullWithTrace(IProgressMonitor monitor,
+	private IndexDiffData calcIndexDiffDataFullWithTrace(
+			IProgressMonitor monitor, String jobName, Repository repository)
+			throws IOException {
+		if (FsMonitor.isEnabled(repository) && !monitor.isCanceled()) {
+			synchronized (fsMonitor) {
+				FsMonitor.Probe probe = fsMonitor.query(repository);
+				IndexDiffData previous = indexDiffData;
+				if (probe != null && probe.isUnchanged() && previous != null
+						&& !monitor.isCanceled()) {
+					fsMonitor.remember(probe);
+					return previous;
+				}
+				try {
+					IndexDiffData result = scanIndexDiffDataFull(monitor,
+							jobName, repository);
+					if (result != null && !monitor.isCanceled()) {
+						fsMonitor.remember(probe);
+					} else {
+						fsMonitor.clear();
+					}
+					return result;
+				} catch (IOException | RuntimeException | Error failure) {
+					fsMonitor.clear();
+					throw failure;
+				}
+			}
+		}
+		fsMonitor.clear();
+		return scanIndexDiffDataFull(monitor, jobName, repository);
+	}
+
+	private IndexDiffData scanIndexDiffDataFull(IProgressMonitor monitor,
 			String jobName, Repository repository)
 			throws IOException {
 		EclipseGitProgressTransformer jgitMonitor = new EclipseGitProgressTransformer(
@@ -783,6 +819,7 @@ public class IndexDiffCacheEntry {
 	 * are canceled.
 	 */
 	public void dispose() {
+		fsMonitor.clear();
 		for (ListenerHandle h : listenerHandles) {
 			h.remove();
 		}
