@@ -118,8 +118,8 @@ public class PostRewriteHookOperationTest extends GitTestCase {
 				break;
 			}
 		}
-		assertEquals(17, starts);
-		assertEquals(2, rejected);
+		assertEquals(22, starts);
+		assertEquals(3, rejected);
 		assertTrue(children.isEmpty());
 	}
 
@@ -451,23 +451,26 @@ public class PostRewriteHookOperationTest extends GitTestCase {
 		resolve("C");
 		assertTrue(resume(RebaseCommand.Operation.CONTINUE).getStatus()
 				.isSuccessful());
-		mapping("rebase", List.of(commits.get("C"), commits.get("D")), List
-				.of(repository.resolve("HEAD"), repository.resolve("HEAD")));
+		mapping("amend\nrebase", List.of(commits.get("C"), commits.get("D")),
+				List.of(repository.resolve("HEAD"),
+						repository.resolve("HEAD")));
 	}
 
 	@Test
-	public void interactiveFixupMapsBothWithoutIntermediateAmendHook()
+	public void interactiveFixupReportsAmendThenFinalMappings()
 			throws Exception {
 		assertTrue(rebase("B", null, Mode.FIXUP).getStatus().isSuccessful());
-		mapping("rebase", List.of(commits.get("C"), commits.get("D")), List
-				.of(repository.resolve("HEAD"), repository.resolve("HEAD")));
+		mapping("amend\nrebase", List.of(commits.get("C"), commits.get("D")),
+				List.of(repository.resolve("HEAD"),
+						repository.resolve("HEAD")));
 	}
 
 	@Test
-	public void interactiveRewordUsesOnlyFinalRebaseNotification()
-			throws Exception {
+	public void interactiveRewordReportsAmendThenRebase() throws Exception {
 		assertTrue(rebase("B", null, Mode.REWORD).getStatus().isSuccessful());
-		twoMappings();
+		mapping("amend\nrebase", List.of(commits.get("C"), commits.get("D")),
+				List.of(repository.resolve("HEAD^"),
+						repository.resolve("HEAD")));
 	}
 
 	@Test
@@ -492,8 +495,9 @@ public class PostRewriteHookOperationTest extends GitTestCase {
 			throws Exception {
 		hook(7, true);
 		assertTrue(rebase("B", null, Mode.FIXUP).getStatus().isSuccessful());
-		mapping("rebase", List.of(commits.get("C"), commits.get("D")), List
-				.of(repository.resolve("HEAD"), repository.resolve("HEAD")));
+		mapping("amend\nrebase", List.of(commits.get("C"), commits.get("D")),
+				List.of(repository.resolve("HEAD"),
+						repository.resolve("HEAD")));
 		assertEquals(RepositoryState.SAFE, repository.getRepositoryState());
 	}
 
@@ -506,17 +510,26 @@ public class PostRewriteHookOperationTest extends GitTestCase {
 		}
 	}
 
-	/** C Git t7504: reword verifies the edited commit message. */
+	/**
+	 * C Git t7504: reword verifies the edited commit message.
+	 *
+	 * @throws Exception
+	 *             if setup or execution fails
+	 */
 	@Test
-	public void rewordInvokesCommitMessageHookWithoutAmendNotification() throws Exception {
-		Path messageHook = repository.getDirectory().toPath().resolve("hooks/commit-msg");
+	public void rewordInvokesCommitMessageHookAndAmendNotification()
+			throws Exception {
+		Path messageHook = repository.getDirectory().toPath()
+				.resolve("hooks/commit-msg");
 		Files.writeString(messageHook, "#!/bin/sh\necho new message >\"$1\"\n");
 		assertTrue(FS.DETECTED.setExecute(messageHook.toFile(), true));
 		assertTrue(rebase("C", null, Mode.REWORD).getStatus().isSuccessful());
 		try (var walk = new org.eclipse.jgit.revwalk.RevWalk(repository)) {
 			assertEquals("new message\n",
-					walk.parseCommit(repository.resolve(Constants.HEAD)).getFullMessage());
+					walk.parseCommit(repository.resolve(Constants.HEAD))
+							.getFullMessage());
 		}
-		mapping("rebase", List.of(commits.get("D")), List.of(repository.resolve(Constants.HEAD)));
+		mapping("amend\nrebase", List.of(commits.get("D")),
+				List.of(repository.resolve(Constants.HEAD)));
 	}
 }
