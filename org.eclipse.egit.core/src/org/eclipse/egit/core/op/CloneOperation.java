@@ -69,6 +69,8 @@ public class CloneOperation {
 
 	private TagOpt tagOption;
 
+	private File templateDirectory;
+
 	/**
 	 * Create a new clone operation.
 	 *
@@ -120,6 +122,15 @@ public class CloneOperation {
 	 */
 	public void setCloneSubmodules(boolean cloneSubmodules) {
 		this.cloneSubmodules = cloneSubmodules;
+	}
+
+	/**
+	 * Select templates for the cloned repository.
+	 * @param directory templates, or null for environment/config defaults
+	 * @since 7.8
+	 */
+	public void setTemplateDirectory(File directory) {
+		templateDirectory = directory;
 	}
 
 	/**
@@ -181,6 +192,7 @@ public class CloneOperation {
 				cloneRepository.setNoCheckout(true);
 			}
 			cloneRepository.setDirectory(workdir);
+			cloneRepository.setTemplateDirectory(templateDirectory);
 			cloneRepository.setProgressMonitor(gitMonitor);
 			cloneRepository.setRemote(remoteName);
 			cloneRepository.setURI(uri.toString());
