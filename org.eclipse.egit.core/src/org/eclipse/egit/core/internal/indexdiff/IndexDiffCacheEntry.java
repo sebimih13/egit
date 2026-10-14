@@ -680,15 +680,22 @@ public class IndexDiffCacheEntry {
 				pendingFsMonitorProbe = null;
 				FsMonitor.Probe probe = fsMonitor.query(repository);
 				IndexDiffData previous = indexDiffData;
-				if (probe != null && probe.isUnchanged() && previous != null
-						&& !monitor.isCanceled()) {
+				boolean unchanged = probe != null && probe.isUnchanged()
+						&& previous != null && !monitor.isCanceled();
+				boolean untrackedOnly = unchanged
+						&& !FsMonitor.isUntrackedCacheEnabled(repository);
+				if (unchanged && !untrackedOnly) {
 					pendingFsMonitorProbe = probe;
 					return previous;
 				}
 				try {
 					IndexDiffData result = scanIndexDiffDataFull(monitor,
 							jobName, repository, fsMonitor.requiresFullContentCheck() || probe != null && previous == null ? List.of("/") //$NON-NLS-1$
-									: probe != null ? probe.getChangedPaths() : List.of());
+									: probe != null ? probe.getChangedPaths() : List.of(),
+							untrackedOnly);
+					if (untrackedOnly && result != null) {
+						result = new IndexDiffData(previous, result);
+					}
 					if (result != null && !monitor.isCanceled()) {
 						pendingFsMonitorProbe = probe;
 					} else {
@@ -729,6 +736,12 @@ public class IndexDiffCacheEntry {
 	private IndexDiffData scanIndexDiffDataFull(IProgressMonitor monitor,
 			String jobName, Repository repository, List<String> checkPaths)
 			throws IOException {
+		return scanIndexDiffDataFull(monitor, jobName, repository, checkPaths, false);
+	}
+
+	private IndexDiffData scanIndexDiffDataFull(IProgressMonitor monitor,
+			String jobName, Repository repository, List<String> checkPaths,
+			boolean untrackedOnly) throws IOException {
 		EclipseGitProgressTransformer jgitMonitor = new EclipseGitProgressTransformer(
 				monitor);
 
@@ -740,6 +753,20 @@ public class IndexDiffCacheEntry {
 			IndexDiff newDiff = new IndexDiff(repository, Constants.HEAD,
 					iterator);
 			newDiff.setForceContentCheckPaths(checkPaths);
+			if (untrackedOnly) {
+				newDiff.setFilter(new org.eclipse.jgit.treewalk.filter.TreeFilter() {
+					@Override
+					public boolean include(org.eclipse.jgit.treewalk.TreeWalk walk) {
+						return walk.getTreeCount() < 2 || walk.isSubtree()
+								|| walk.getRawMode(1) == 0;
+					}
+					@Override
+					public boolean shouldBeRecursive() { return true; }
+					@Override
+					public org.eclipse.jgit.treewalk.filter.TreeFilter clone() { return this; }
+				});
+			}
+
 			newDiff.diff(jgitMonitor, 0, 0, jobName,
 					() -> RepositoryCache.INSTANCE.getBuilder(true, true));
 			return new IndexDiffData(newDiff);

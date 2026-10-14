@@ -112,6 +112,23 @@ public class IndexDiffData {
 				new HashMap<>(indexDiff.getConflictingStageStates()));
 	}
 
+	IndexDiffData(IndexDiffData tracked, IndexDiffData untracked) {
+		added = tracked.added;
+		assumeUnchanged = tracked.assumeUnchanged;
+		changed = tracked.changed;
+		removed = tracked.removed;
+		missing = tracked.missing;
+		modified = tracked.modified;
+		conflicts = tracked.conflicts;
+		conflictStates = tracked.conflictStates;
+		symlinks = tracked.symlinks;
+		submodules = tracked.submodules;
+		changedResources = tracked.changedResources;
+		this.untracked = untracked.untracked;
+		untrackedFolders = untracked.untrackedFolders;
+		ignored = untracked.ignored;
+	}
+
 	private Set<String> getUntrackedFolders(IndexDiff indexDiff) {
 		HashSet<String> result = new HashSet<>();
 		for (String folder:indexDiff.getUntrackedFolders())

@@ -53,6 +53,7 @@ public class FsMonitorIndexDiffCacheTest extends GitTestCase {
 					hook.toString());
 			repository.getConfig().setBoolean("jgit", null, "fsmonitorCache",
 					true);
+			repository.getConfig().setBoolean("core", null, "untrackedCache", true);
 			entry = new IndexDiffCacheEntry(repository, null);
 			waitForJobs();
 			IndexDiffData initial = entry.getIndexDiff();
@@ -120,6 +121,7 @@ public class FsMonitorIndexDiffCacheTest extends GitTestCase {
 					hook.toString());
 			repository.getConfig().setBoolean("jgit", null, "fsmonitorCache",
 					true);
+			repository.getConfig().setBoolean("core", null, "untrackedCache", true);
 			entry = new IndexDiffCacheEntry(repository, null);
 			waitForJobs();
 			IndexDiffData initial = entry.getIndexDiff();
@@ -184,6 +186,7 @@ public class FsMonitorIndexDiffCacheTest extends GitTestCase {
 					hook.toString());
 			repository.getConfig().setBoolean("jgit", null, "fsmonitorCache",
 					true);
+			repository.getConfig().setBoolean("core", null, "untrackedCache", true);
 			entry = new IndexDiffCacheEntry(repository, null);
 			waitForJobs();
 			assertNotNull(entry.getIndexDiff());
