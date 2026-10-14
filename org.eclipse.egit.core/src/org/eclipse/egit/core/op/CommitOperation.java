@@ -77,6 +77,8 @@ public class CommitOperation implements IEGitOperation {
 
 	private boolean amending = false;
 
+	private boolean noPostRewrite;
+
 	private boolean commitAll = false;
 
 	private boolean sign = false;
@@ -258,6 +260,7 @@ public class CommitOperation implements IEGitOperation {
 			CommitCommand commitCommand = git.commit();
 			setAuthorAndCommitter(commitCommand);
 			commitCommand.setAmend(amending)
+					.setNoPostRewrite(noPostRewrite)
 					.setMessage(message)
 					.setInsertChangeId(createChangeId);
 			if (!commitIndex)
@@ -278,6 +281,16 @@ public class CommitOperation implements IEGitOperation {
 	 */
 	public void setAmending(boolean amending) {
 		this.amending = amending;
+	}
+
+	/**
+	 * Suppress the post-rewrite notification for an amendment.
+	 *
+	 * @param noPostRewrite whether to suppress notification
+	 * @since 7.8
+	 */
+	public void setNoPostRewrite(boolean noPostRewrite) {
+		this.noPostRewrite = noPostRewrite;
 	}
 
 	/**
@@ -316,7 +329,8 @@ public class CommitOperation implements IEGitOperation {
 		try (Git git = new Git(repo)) {
 			CommitCommand commitCommand = git.commit();
 			setAuthorAndCommitter(commitCommand);
-			commit = commitCommand.setAll(true).setMessage(message)
+			commit = commitCommand.setAll(true).setAmend(amending)
+					.setNoPostRewrite(noPostRewrite).setMessage(message)
 					.setInsertChangeId(createChangeId).call();
 		} catch (JGitInternalException e) {
 			throw new TeamException(CoreText.MergeOperation_InternalError, e);

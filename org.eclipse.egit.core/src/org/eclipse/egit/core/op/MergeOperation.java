@@ -76,6 +76,8 @@ public class MergeOperation implements IEGitOperation {
 
 	private Boolean commit;
 
+	private boolean noVerify;
+
 	private MergeResult mergeResult;
 
 	private String message;
@@ -141,6 +143,17 @@ public class MergeOperation implements IEGitOperation {
 	}
 
 	/**
+	 * Bypass pre-merge-commit and commit-msg verification.
+	 *
+	 * @param noVerify
+	 *            whether to bypass verification
+	 * @since 7.8
+	 */
+	public void setNoVerify(boolean noVerify) {
+		this.noVerify = noVerify;
+	}
+
+	/**
 	 * Set the commit message to be used for the merge commit (in case one is
 	 * created)
 	 *
@@ -202,6 +215,7 @@ public class MergeOperation implements IEGitOperation {
 							ConfigConstants.CONFIG_KEY_CREATECHANGEID, false)) {
 						merge.setInsertChangeId(true);
 					}
+					merge.setNoVerify(noVerify);
 					mergeResult = merge.call();
 					if (MergeResult.MergeStatus.NOT_SUPPORTED
 							.equals(mergeResult.getMergeStatus())) {

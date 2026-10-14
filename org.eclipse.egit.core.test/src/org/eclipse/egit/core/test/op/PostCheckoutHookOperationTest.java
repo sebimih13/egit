@@ -174,21 +174,21 @@ public class PostCheckoutHookOperationTest extends GitTestCase {
 	}
 
 	@Test
-	public void branchSwitchThenRebaseMatchesNativeBranchArgumentScenario()
+	public void targetBranchRebaseMatchesNativeBranchArgumentScenario()
 			throws Exception {
 		git.branchCreate().setName("rebase-fast-forward").setStartPoint("three")
 				.call();
 		new BranchOperation(repository, "refs/tags/two").execute(null);
 		Files.delete(args.toPath());
-		new BranchOperation(repository, "refs/heads/rebase-fast-forward")
-				.execute(null);
-		new RebaseOperation(repository, repository.exactRef("refs/tags/two"))
-				.execute(null);
+		RebaseOperation operation = new RebaseOperation(repository,
+				repository.exactRef("refs/tags/two"));
+		operation.setBranch("rebase-fast-forward");
+		operation.execute(null);
 		check(two, three, true);
 	}
 
 	@Test
-	public void branchSwitchForRebasePreservesUntrackedFile() throws Exception {
+	public void targetBranchRebasePreservesUntrackedFile() throws Exception {
 		git.branchCreate().setName("rebase-fast-forward").setStartPoint("three")
 				.call();
 		new BranchOperation(repository, "refs/tags/two").execute(null);
@@ -196,11 +196,12 @@ public class PostCheckoutHookOperationTest extends GitTestCase {
 		Files.writeString(
 				new File(repository.getWorkTree(), "three.t").toPath(),
 				"untracked");
-		BranchOperation branch = new BranchOperation(repository,
-				"refs/heads/rebase-fast-forward");
-		branch.execute(null);
-		assertEquals(org.eclipse.jgit.api.CheckoutResult.Status.CONFLICTS,
-				branch.getResult(repository).getStatus());
+		RebaseOperation operation = new RebaseOperation(repository,
+				repository.exactRef("refs/tags/two"));
+		operation.setBranch("rebase-fast-forward");
+		operation.execute(null);
+		assertEquals(org.eclipse.jgit.api.RebaseResult.Status.CONFLICTS,
+				operation.getResult().getStatus());
 		assertFalse(args.exists());
 		assertEquals(two, repository.resolve(Constants.HEAD));
 		assertEquals("untracked", Files.readString(

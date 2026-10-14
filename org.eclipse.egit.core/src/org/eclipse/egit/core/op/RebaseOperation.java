@@ -58,6 +58,14 @@ public class RebaseOperation implements IEGitOperation {
 
 	private boolean preserveMerges = false;
 
+	private boolean noVerify;
+
+	private boolean force;
+
+	private String branch;
+
+	private String onto;
+
 	/**
 	 * Construct a {@link RebaseOperation} object for a {@link Ref}.
 	 * <p>
@@ -160,7 +168,12 @@ public class RebaseOperation implements IEGitOperation {
 					}
 					if (operation == Operation.BEGIN) {
 						cmd.setPreserveMerges(preserveMerges);
-						result = cmd.setUpstream(ref.getName()).call();
+						cmd.setBranch(branch).setNoVerify(noVerify).setForce(force);
+						cmd.setUpstream(ref.getName());
+						if (onto != null) {
+							cmd.setOnto(onto);
+						}
+						result = cmd.call();
 					} else {
 						result = cmd.setOperation(operation).call();
 					}
@@ -217,4 +230,44 @@ public class RebaseOperation implements IEGitOperation {
 	public void setPreserveMerges(boolean preserveMerges) {
 		this.preserveMerges = preserveMerges;
 	}
+	/**
+	 * Replay commits even when a shortcut would leave them unchanged.
+	 *
+	 * @param force whether to force replay
+	 * @since 7.8
+	 */
+	public void setForce(boolean force) {
+		this.force = force;
+	}
+
+	/**
+	 * Bypass pre-rebase verification.
+	 *
+	 * @param noVerify whether to bypass the hook
+	 * @since 7.8
+	 */
+	public void setNoVerify(boolean noVerify) {
+		this.noVerify = noVerify;
+	}
+
+	/**
+	 * Select the branch or revision to rebase.
+	 *
+	 * @param branch branch or revision, or null for current HEAD
+	 * @since 7.8
+	 */
+	public void setBranch(String branch) {
+		this.branch = branch;
+	}
+
+	/**
+	 * Select the replay target independently of the upstream range boundary.
+	 *
+	 * @param onto target revision, or null for the selected upstream
+	 * @since 7.8
+	 */
+	public void setOnto(String onto) {
+		this.onto = onto;
+	}
+
 }
