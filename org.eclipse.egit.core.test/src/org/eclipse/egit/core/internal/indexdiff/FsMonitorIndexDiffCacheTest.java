@@ -33,6 +33,83 @@ import org.junit.Test;
 
 public class FsMonitorIndexDiffCacheTest extends GitTestCase {
 	@Test
+	public void keepCacheHitReusesValidatedIndexAndRemovalRescansUntracked()
+			throws Exception {
+		assumeFalse(SystemReader.getInstance().isWindows());
+		TestRepository fixture = new TestRepository(gitDir);
+		Repository source = fixture.getRepository();
+		Path response = source.getDirectory().toPath()
+				.resolve("monitor-response");
+		Path hook = source.getDirectory().toPath()
+				.resolve("hooks/fsmonitor-test");
+		Files.createDirectories(hook.getParent());
+		Files.writeString(hook, "#!/bin/sh\ncat '"
+				+ response.toString().replace("'", "'\\''") + "'\n");
+		assertTrue(hook.toFile().setExecutable(true));
+		Files.writeString(response, "initial\0/\0");
+		source.getConfig().setString("core", null, "fsmonitor",
+				hook.toString());
+		source.getConfig().setBoolean("jgit", null, "fsmonitorCache", true);
+		source.getConfig().setString("core", null, "untrackedCache", "keep");
+		source.getConfig().save();
+		org.eclipse.jgit.dircache.DirCache index = source.lockDirCache();
+		try {
+			index.setUntrackedCache(
+					new org.eclipse.jgit.internal.storage.file.UntrackedCache());
+			index.write();
+			assertTrue(index.commit());
+		} finally {
+			index.unlock();
+		}
+		java.util.concurrent.atomic.AtomicInteger reads = new java.util.concurrent.atomic.AtomicInteger();
+		IndexDiffCacheEntry entry = null;
+		try (Repository repository = new org.eclipse.jgit.internal.storage.file.FileRepository(
+				gitDir) {
+			@Override
+			public org.eclipse.jgit.dircache.DirCache readDirCache()
+					throws java.io.IOException {
+				reads.incrementAndGet();
+				return super.readDirCache();
+			}
+		}) {
+			entry = new IndexDiffCacheEntry(repository, null);
+			waitForJobs();
+			IndexDiffData initial = entry.getIndexDiff();
+			assertNotNull(initial);
+			Files.writeString(response, "stable\0");
+			int before = reads.get();
+			for (int i = 0; i < 3; i++) {
+				entry.refresh();
+				waitForJobs();
+				assertSame(initial, entry.getIndexDiff());
+			}
+			org.junit.Assert.assertEquals(
+					"Unchanged refresh must not parse the index again", before,
+					reads.get());
+			index = repository.lockDirCache();
+			try {
+				index.setUntrackedCache(null);
+				index.write();
+				assertTrue(index.commit());
+			} finally {
+				index.unlock();
+			}
+			Files.writeString(
+					repository.getWorkTree().toPath().resolve("unreported"),
+					"new");
+			entry.refresh();
+			waitForJobs();
+			assertTrue(
+					entry.getIndexDiff().getUntracked().contains("unreported"));
+		} finally {
+			if (entry != null) {
+				entry.dispose();
+			}
+			fixture.dispose();
+		}
+	}
+
+	@Test
 	public void unchangedRefreshReusesAndIncrementalUpdatesInvalidate()
 			throws Exception {
 		assumeFalse(SystemReader.getInstance().isWindows());
@@ -435,6 +512,48 @@ public class FsMonitorIndexDiffCacheTest extends GitTestCase {
 		restoredTimestampEdit(true);
 	}
 
+
+	@Test
+	public void invalidParentDeltaForcesContentChecksAndDoesNotSeedReuse()
+			throws Exception {
+		String script = "if [ -f .git/monitor-response ]; then "
+				+ "cat .git/monitor-response; else printf 'token\\0'; fi\n";
+		try (MonitoredFixture f = new MonitoredFixture(script);
+				org.eclipse.jgit.api.Git git = new org.eclipse.jgit.api.Git(
+						f.repository)) {
+			Path tracked = f.repository.getWorkTree().toPath().resolve("tracked");
+			Files.writeString(tracked, "one");
+			java.nio.file.attribute.FileTime time = java.nio.file.attribute.FileTime
+					.fromMillis(System.currentTimeMillis() - 60_000);
+			Files.setLastModifiedTime(tracked, time);
+			git.add().addFilepattern("tracked").call();
+			git.commit().setAuthor("Monitor Test", "monitor@example.invalid")
+					.setCommitter("Monitor Test", "monitor@example.invalid")
+					.setMessage("base").call();
+			f.entry.refresh();
+			waitForJobs();
+			assertTrue(f.entry.getIndexDiff().getModified().isEmpty());
+			Files.writeString(tracked, "two");
+			Files.setLastModifiedTime(tracked, time);
+			Path response = f.repository.getDirectory().toPath()
+					.resolve("monitor-response");
+			Files.writeString(response, "token\0directory\n/../outside\0");
+			f.entry.refresh();
+			waitForJobs();
+			IndexDiffData fallback = f.entry.getIndexDiff();
+			org.junit.Assert.assertEquals(java.util.Set.of("tracked"),
+					fallback.getModified());
+			Files.writeString(response, "token\0");
+			f.entry.refresh();
+			waitForJobs();
+			IndexDiffData seeded = f.entry.getIndexDiff();
+			assertNotSame(fallback, seeded);
+			equalData(fallback, seeded);
+			f.entry.refresh();
+			waitForJobs();
+			assertSame(seeded, f.entry.getIndexDiff());
+		}
+	}
 
 	@Test
 	public void failedHookFallbackAlsoChecksRestoredTimestampContents() throws Exception {

@@ -683,7 +683,7 @@ public class IndexDiffCacheEntry {
 				boolean unchanged = probe != null && probe.isUnchanged()
 						&& previous != null && !monitor.isCanceled();
 				boolean untrackedOnly = unchanged
-						&& !FsMonitor.isUntrackedCacheEnabled(repository);
+						&& !FsMonitor.isUntrackedCacheEnabled(repository, probe);
 				if (unchanged && !untrackedOnly) {
 					pendingFsMonitorProbe = probe;
 					return previous;
