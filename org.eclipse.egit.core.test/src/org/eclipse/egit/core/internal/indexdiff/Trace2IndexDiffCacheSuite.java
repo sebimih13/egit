@@ -14,6 +14,10 @@ import static org.junit.Assert.assertTrue;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.HashSet;
+import java.util.Set;
+
+import com.google.gson.JsonParser;
 
 import org.eclipse.jgit.util.Trace2;
 import org.junit.AfterClass;
@@ -52,5 +56,40 @@ public class Trace2IndexDiffCacheSuite {
 		assertTrue(output.contains("\"name\":\"status\"")); //$NON-NLS-1$
 		assertTrue(output.contains("\"value\":\"egit.indexdiff.full\"")); //$NON-NLS-1$
 		assertTrue(output.contains("\"value\":\"egit.indexdiff.incremental\"")); //$NON-NLS-1$
+		verifyWorkerRegions(output);
+	}
+
+	static void verifyWorkerRegions(String output) {
+		String[] lines = output.strip().split("\n"); //$NON-NLS-1$
+		// File targets append across PDE launches; inspect this session only.
+		String sid = JsonParser.parseString(lines[lines.length - 1])
+				.getAsJsonObject().get("sid").getAsString(); //$NON-NLS-1$
+		Set<String> active = new HashSet<>();
+		Set<String> seen = new HashSet<>();
+		for (String line : lines) {
+			var event = JsonParser.parseString(line).getAsJsonObject();
+			if (!sid.equals(event.get("sid").getAsString())) { //$NON-NLS-1$
+				continue;
+			}
+			String thread = event.get("thread").getAsString(); //$NON-NLS-1$
+			switch (event.get("event").getAsString()) { //$NON-NLS-1$
+			case "thread_start": //$NON-NLS-1$
+				assertTrue("Worker identity must be unique", seen.add(thread)); //$NON-NLS-1$
+				active.add(thread);
+				break;
+			case "region_enter": //$NON-NLS-1$
+			case "region_leave": //$NON-NLS-1$
+				assertTrue("Receiver needs thread_start before a worker region: " //$NON-NLS-1$
+						+ thread, "main".equals(thread) || active.contains(thread)); //$NON-NLS-1$
+				break;
+			case "thread_exit": //$NON-NLS-1$
+				assertTrue("Worker must be active", active.remove(thread)); //$NON-NLS-1$
+				break;
+			default:
+				break;
+			}
+		}
+		assertTrue("Cache tests must exercise background tracing", !seen.isEmpty()); //$NON-NLS-1$
+		assertTrue("Worker contexts must close after jobs", active.isEmpty()); //$NON-NLS-1$
 	}
 }

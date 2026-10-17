@@ -75,5 +75,6 @@ public class Trace2OperationsSuite {
 		assertTrue(output.contains("\"name\":\"status\"")); //$NON-NLS-1$
 		assertTrue(output.contains("\"value\":\"egit.indexdiff.full\"")); //$NON-NLS-1$
 		assertTrue(output.contains("\"value\":\"egit.indexdiff.incremental\"")); //$NON-NLS-1$
+		Trace2IndexDiffCacheSuite.verifyWorkerRegions(output);
 	}
 }
