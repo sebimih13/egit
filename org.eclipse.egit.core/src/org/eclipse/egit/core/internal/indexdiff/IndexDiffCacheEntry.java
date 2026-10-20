@@ -395,11 +395,16 @@ public class IndexDiffCacheEntry {
 			@Override
 			protected IStatus reload(IProgressMonitor monitor) {
 				lock.lock();
+				boolean acquired = false;
 				try {
 					if (monitor.isCanceled()) {
 						return Status.CANCEL_STATUS;
 					}
 					parallelism.acquire();
+					acquired = true;
+					if (monitor.isCanceled()) {
+						return Status.CANCEL_STATUS;
+					}
 					long startTime = System.currentTimeMillis();
 					Repository repository = getRepository();
 					if (repository == null) {
@@ -433,7 +438,9 @@ public class IndexDiffCacheEntry {
 					return Status.CANCEL_STATUS;
 				} finally {
 					lock.unlock();
-					parallelism.release();
+					if (acquired) {
+						parallelism.release();
+					}
 				}
 			}
 

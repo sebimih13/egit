@@ -33,6 +33,74 @@ import org.junit.Test;
 
 public class FsMonitorIndexDiffCacheTest extends GitTestCase {
 	@Test
+	public void missingHookFallbackRetainsRestoredTimestampChanges()
+			throws Exception {
+		try (MonitoredFixture f = new MonitoredFixture(trackedHook());
+				org.eclipse.jgit.api.Git git = new org.eclipse.jgit.api.Git(
+						f.repository)) {
+			Path tracked = f.repository.getWorkTree().toPath().resolve("tracked");
+			Files.writeString(tracked, "one");
+			java.nio.file.attribute.FileTime time = java.nio.file.attribute.FileTime
+					.fromMillis(System.currentTimeMillis() - 60_000);
+			Files.setLastModifiedTime(tracked, time);
+			git.add().addFilepattern("tracked").call();
+			git.commit().setAuthor("Monitor Test", "monitor@example.invalid")
+					.setCommitter("Monitor Test", "monitor@example.invalid")
+					.setMessage("base").call();
+			waitForJobs();
+			f.entry.refresh();
+			waitForJobs();
+			assertTrue(f.entry.getIndexDiff().getModified().isEmpty());
+			Files.writeString(tracked, "two");
+			Files.setLastModifiedTime(tracked, time);
+			Files.delete(f.hook);
+			for (int i = 0; i < 2; i++) {
+				f.entry.refresh();
+				waitForJobs();
+				org.junit.Assert.assertEquals(java.util.Set.of("tracked"),
+						f.entry.getIndexDiff().getModified());
+			}
+			Files.writeString(f.repository.getWorkTree().toPath().resolve("other"),
+					"untracked");
+			f.entry.refreshFiles(List.of("other"));
+			waitForJobs();
+			f.entry.refresh();
+			waitForJobs();
+			org.junit.Assert.assertEquals("Incremental invalidation must retain the content-check obligation",
+					java.util.Set.of("tracked"), f.entry.getIndexDiff().getModified());
+		}
+	}
+
+	@Test
+	public void canceledReloadDoesNotIncreaseParallelism() throws Exception {
+		try (MonitoredFixture f = new MonitoredFixture(inclusiveHook())) {
+			Field jobs = IndexDiffCacheEntry.class.getDeclaredField("reloadJob");
+			jobs.setAccessible(true);
+			Object job = jobs.get(f.entry);
+			Method reload = job.getClass().getDeclaredMethod("reload",
+					IProgressMonitor.class);
+			reload.setAccessible(true);
+			Field permits = IndexDiffCacheEntry.class.getDeclaredField("parallelism");
+			permits.setAccessible(true);
+			java.util.concurrent.Semaphore semaphore = (java.util.concurrent.Semaphore) permits
+					.get(null);
+			int before = semaphore.availablePermits();
+			NullProgressMonitor canceled = new NullProgressMonitor();
+			canceled.setCanceled(true);
+			try {
+				reload.invoke(job, canceled);
+				org.junit.Assert.assertEquals(before, semaphore.availablePermits());
+			} finally {
+				// Keep a failing baseline reproduction from changing other tests.
+				int extra = semaphore.availablePermits() - before;
+				if (extra > 0) {
+					semaphore.acquire(extra);
+				}
+			}
+		}
+	}
+
+	@Test
 	public void keepCacheHitReusesValidatedIndexAndRemovalRescansUntracked()
 			throws Exception {
 		assumeFalse(SystemReader.getInstance().isWindows());
