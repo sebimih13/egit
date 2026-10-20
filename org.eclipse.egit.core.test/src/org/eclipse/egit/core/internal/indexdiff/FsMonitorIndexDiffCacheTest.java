@@ -33,6 +33,40 @@ import org.junit.Test;
 
 public class FsMonitorIndexDiffCacheTest extends GitTestCase {
 	@Test
+	public void stagingRefreshJobKeepsTracingOpenAndRevalidatesMonitorState()
+			throws Exception {
+		try (MonitoredFixture f = new MonitoredFixture(inclusiveHook())) {
+			org.eclipse.jgit.util.Trace2 trace = org.eclipse.jgit.util.Trace2
+					.getInstance();
+			boolean tracing = trace.isEnabled();
+			IndexDiffData initial = f.entry.getIndexDiff();
+			stagingRefresh(f.entry);
+			assertSame(initial, f.entry.getIndexDiff());
+			f.change();
+			stagingRefresh(f.entry);
+			IndexDiffData changed = f.entry.getIndexDiff();
+			assertNotSame(initial, changed);
+			assertTrue(changed.getUntracked().contains("monitor-new"));
+			stagingRefresh(f.entry);
+			assertSame(changed, f.entry.getIndexDiff());
+			org.junit.Assert.assertSame(trace,
+					org.eclipse.jgit.util.Trace2.getInstance());
+			org.junit.Assert.assertEquals("Refresh must not end the library session",
+					tracing, trace.isEnabled());
+		}
+	}
+
+	private static void stagingRefresh(IndexDiffCacheEntry entry)
+			throws Exception {
+		// This is the exact job factory invoked by StagingView.refreshAction.
+		Job refresh = entry.createRefreshResourcesAndIndexDiffJob();
+		refresh.schedule();
+		assertTrue("Staging refresh must finish", refresh.join(10000, null));
+		assertTrue(refresh.getResult().toString(), refresh.getResult().isOK());
+		waitForJobs();
+	}
+
+	@Test
 	public void missingHookFallbackRetainsRestoredTimestampChanges()
 			throws Exception {
 		try (MonitoredFixture f = new MonitoredFixture(trackedHook());

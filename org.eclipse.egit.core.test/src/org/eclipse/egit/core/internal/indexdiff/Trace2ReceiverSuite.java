@@ -24,6 +24,7 @@ import org.junit.runners.Suite;
  */
 @RunWith(Suite.class)
 @Suite.SuiteClasses({ IndexDiffCacheTest.class, IndexDiffCacheEntryTest.class,
+		FsMonitorIndexDiffCacheTest.class,
 		org.eclipse.egit.core.test.op.AddOperationTest.class,
 		org.eclipse.egit.core.test.op.CommitOperationTest.class,
 		org.eclipse.egit.core.test.op.BranchOperationTest.class,
