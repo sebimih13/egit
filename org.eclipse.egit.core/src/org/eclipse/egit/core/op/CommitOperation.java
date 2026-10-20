@@ -79,6 +79,8 @@ public class CommitOperation implements IEGitOperation {
 
 	private boolean noPostRewrite;
 
+	private boolean noVerify;
+
 	private boolean commitAll = false;
 
 	private boolean sign = false;
@@ -261,6 +263,7 @@ public class CommitOperation implements IEGitOperation {
 			setAuthorAndCommitter(commitCommand);
 			commitCommand.setAmend(amending)
 					.setNoPostRewrite(noPostRewrite)
+					.setNoVerify(noVerify)
 					.setMessage(message)
 					.setInsertChangeId(createChangeId);
 			if (!commitIndex)
@@ -291,6 +294,17 @@ public class CommitOperation implements IEGitOperation {
 	 */
 	public void setNoPostRewrite(boolean noPostRewrite) {
 		this.noPostRewrite = noPostRewrite;
+	}
+
+	/**
+	 * Bypass pre-commit and commit-msg verification. Message preparation and
+	 * post-commit notification still run.
+	 *
+	 * @param noVerify whether to bypass verification hooks
+	 * @since 7.8
+	 */
+	public void setNoVerify(boolean noVerify) {
+		this.noVerify = noVerify;
 	}
 
 	/**
@@ -330,7 +344,8 @@ public class CommitOperation implements IEGitOperation {
 			CommitCommand commitCommand = git.commit();
 			setAuthorAndCommitter(commitCommand);
 			commit = commitCommand.setAll(true).setAmend(amending)
-					.setNoPostRewrite(noPostRewrite).setMessage(message)
+					.setNoPostRewrite(noPostRewrite)
+					.setNoVerify(noVerify).setMessage(message)
 					.setInsertChangeId(createChangeId).call();
 		} catch (JGitInternalException e) {
 			throw new TeamException(CoreText.MergeOperation_InternalError, e);

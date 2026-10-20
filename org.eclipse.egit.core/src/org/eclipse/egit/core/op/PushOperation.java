@@ -37,6 +37,8 @@ import org.eclipse.jgit.lib.Constants;
 import org.eclipse.jgit.lib.ObjectId;
 import org.eclipse.jgit.lib.Repository;
 import org.eclipse.jgit.transport.CredentialsProvider;
+import org.eclipse.jgit.transport.PushConfig;
+import org.eclipse.jgit.transport.PushConfig.PushDefault;
 import org.eclipse.jgit.transport.PushResult;
 import org.eclipse.jgit.transport.RemoteConfig;
 import org.eclipse.jgit.transport.RemoteRefUpdate;
@@ -53,6 +55,8 @@ import org.eclipse.osgi.util.NLS;
 public class PushOperation {
 
 	private final Repository localDb;
+
+	private boolean noVerify;
 
 	private final PushOperationSpecification specification;
 
@@ -201,6 +205,24 @@ public class PushOperation {
 	}
 
 	/**
+	 * Bypass the local pre-push hook. Server-side hooks still run.
+	 *
+	 * @param noVerify whether to bypass the pre-push hook
+	 * @since 7.8
+	 */
+	public void setNoVerify(boolean noVerify) {
+		this.noVerify = noVerify;
+	}
+
+	private PushDefault configuredPushDefault() {
+		Config config = localDb.getConfig();
+		// Preserve the operation's historical default when no policy is set.
+		return config.getString("push", null, "default") == null //$NON-NLS-1$ //$NON-NLS-2$
+				? PushDefault.CURRENT
+				: config.get(PushConfig::new).getPushDefault();
+	}
+
+	/**
 	 * @param actMonitor
 	 *            may be <code>null</code> if progress monitoring is not desired
 	 * @throws InvocationTargetException
@@ -264,6 +286,7 @@ public class PushOperation {
 
 					try (Transport transport = Transport.open(localDb, uri)) {
 						transport.setDryRun(dryRun);
+						transport.setRunPrePushHook(!noVerify);
 						transport.setTimeout(timeout);
 						if (credentialsProvider != null) {
 							transport.setCredentialsProvider(
@@ -314,6 +337,8 @@ public class PushOperation {
 								hookCharset)) {
 					Iterable<PushResult> results = git.push()
 							.setRemote(remoteName)
+							.setNoVerify(noVerify)
+							.setPushDefault(configuredPushDefault())
 							.setDryRun(dryRun)
 							.setTimeout(timeout)
 							.setProgressMonitor(gitMonitor)

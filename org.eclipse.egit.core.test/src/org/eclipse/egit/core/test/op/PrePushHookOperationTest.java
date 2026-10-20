@@ -26,9 +26,26 @@ public class PrePushHookOperationTest extends PrePushHookTestCase {
 	@Override
 	protected PushResult push(String remote, List<RefSpec> specifications)
 			throws Exception {
+		return executePush(remote, specifications, false);
+	}
+
+	@Override
+	protected PushResult pushWithoutVerification(String remote,
+			List<RefSpec> specifications) throws Exception {
+		return executePush(remote, specifications, true);
+	}
+
+	private PushResult executePush(String remote, List<RefSpec> specifications,
+			boolean noVerify) throws Exception {
 		URIish uri = new URIish(location);
 		PushOperation operation;
-		if ("parent1".equals(remote)) {
+		if (remote == null || !remote.equals(location)) {
+			if (!specifications.isEmpty()) {
+				db.getConfig().setStringList("remote", remote, "push",
+						specifications.stream().map(RefSpec::toString)
+								.toList());
+				db.getConfig().save();
+			}
 			operation = new PushOperation(db, remote, false, 0);
 		} else {
 			PushOperationSpecification specification = new PushOperationSpecification();
@@ -38,7 +55,9 @@ public class PrePushHookOperationTest extends PrePushHookTestCase {
 			}
 			operation = new PushOperation(db, specification, false, 0);
 		}
+		operation.setNoVerify(noVerify);
 		operation.run(new NullProgressMonitor());
+		uri = operation.getOperationResult().getURIs().iterator().next();
 		PushResult result = operation.getOperationResult().getPushResult(uri);
 		if (result == null) {
 			throw new IOException(
@@ -46,4 +65,13 @@ public class PrePushHookOperationTest extends PrePushHookTestCase {
 		}
 		return result;
 	}
+
+	@org.junit.Test
+	public void unsetPushDefaultPreservesCurrentBranchBehavior()
+			throws Exception {
+		installPrePush(0);
+		push("parent1", List.of());
+		org.junit.Assert.assertEquals(next, server.resolve("refs/heads/main"));
+	}
+
 }
