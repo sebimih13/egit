@@ -43,6 +43,7 @@ import org.eclipse.egit.core.internal.signing.GpgConfigurationException;
 import org.eclipse.egit.core.project.RepositoryMapping;
 import org.eclipse.jgit.api.AddCommand;
 import org.eclipse.jgit.api.CommitCommand;
+import org.eclipse.jgit.lib.CommitConfig.CleanupMode;
 import org.eclipse.jgit.api.Git;
 import org.eclipse.jgit.api.errors.GitAPIException;
 import org.eclipse.jgit.api.errors.JGitInternalException;
@@ -83,6 +84,14 @@ public class CommitOperation implements IEGitOperation {
 
 	private Boolean allowEmpty;
 
+	private Boolean allowEmptyMessage;
+
+	private boolean useNativeMessageCleanup;
+
+	private CleanupMode cleanupMode;
+
+	private String originalMessage;
+
 	private String hookPrefix = ""; //$NON-NLS-1$
 
 	private boolean commitAll = false;
@@ -116,6 +125,7 @@ public class CommitOperation implements IEGitOperation {
 			String author, String committer, String message) throws CoreException {
 		this.author = author;
 		this.committer = committer;
+		this.originalMessage = message == null ? "" : message; //$NON-NLS-1$
 		this.message = stripLeadingWhitespace(message);
 		if (filesToCommit != null && filesToCommit.length > 0)
 			setRepository(filesToCommit[0]);
@@ -144,6 +154,7 @@ public class CommitOperation implements IEGitOperation {
 		this.repo = repository;
 		this.author = author;
 		this.committer = committer;
+		this.originalMessage = message == null ? "" : message; //$NON-NLS-1$
 		this.message = stripLeadingWhitespace(message);
 		if (filesToCommit != null)
 			commitFileList = new HashSet<>(filesToCommit);
@@ -164,6 +175,7 @@ public class CommitOperation implements IEGitOperation {
 		this.repo = repository;
 		this.author = author;
 		this.committer = committer;
+		this.originalMessage = message == null ? "" : message; //$NON-NLS-1$
 		this.message = stripLeadingWhitespace(message);
 		this.commitIndex = true;
 	}
@@ -268,7 +280,7 @@ public class CommitOperation implements IEGitOperation {
 			commitCommand.setAmend(amending)
 					.setNoPostRewrite(noPostRewrite)
 					.setNoVerify(noVerify).setHookPrefix(hookPrefix)
-					.setMessage(message)
+					.setMessage(useNativeMessageCleanup ? originalMessage : message)
 					.setInsertChangeId(createChangeId);
 			if (!commitIndex)
 				for(String path:commitFileList)
@@ -298,6 +310,34 @@ public class CommitOperation implements IEGitOperation {
 	 */
 	public void setNoPostRewrite(boolean noPostRewrite) {
 		this.noPostRewrite = noPostRewrite;
+	}
+
+	/**
+	 * Select native message-file normalization while retaining the supplied
+	 * message for VERBATIM mode. Defaults to the existing operation behavior.
+	 * @param nativeCleanup whether to normalize before/after message hooks
+	 * @since 7.8
+	 */
+	public void setUseNativeMessageCleanup(boolean nativeCleanup) {
+		useNativeMessageCleanup = nativeCleanup;
+	}
+
+	/**
+	 * Set an explicit message cleanup policy; null retains the default.
+	 * @param cleanup cleanup policy
+	 * @since 7.8
+	 */
+	public void setCleanupMode(CleanupMode cleanup) {
+		cleanupMode = cleanup;
+	}
+
+	/**
+	 * Set an explicit empty-message policy, preserving the old default if unset.
+	 * @param allow whether an empty final message is allowed
+	 * @since 7.8
+	 */
+	public void setAllowEmptyMessage(boolean allow) {
+		allowEmptyMessage = Boolean.valueOf(allow);
 	}
 
 	/**
@@ -369,7 +409,7 @@ public class CommitOperation implements IEGitOperation {
 			setAuthorAndCommitter(commitCommand);
 			commit = commitCommand.setAll(true).setAmend(amending)
 					.setNoPostRewrite(noPostRewrite)
-					.setNoVerify(noVerify).setHookPrefix(hookPrefix).setMessage(message)
+					.setNoVerify(noVerify).setHookPrefix(hookPrefix).setMessage(useNativeMessageCleanup ? originalMessage : message)
 					.setInsertChangeId(createChangeId).call();
 		} catch (JGitInternalException e) {
 			throw new TeamException(CoreText.MergeOperation_InternalError, e);
@@ -423,6 +463,19 @@ public class CommitOperation implements IEGitOperation {
 
 		if (allowEmpty != null) {
 			commitCommand.setAllowEmpty(allowEmpty.booleanValue());
+		}
+
+		if (cleanupMode != null) {
+			commitCommand.setCleanupMode(cleanupMode);
+		} else if (useNativeMessageCleanup) {
+			commitCommand.setCleanupMode(CleanupMode.DEFAULT);
+		}
+		commitCommand.setUseNativeMessageCleanup(useNativeMessageCleanup);
+		if (useNativeMessageCleanup) {
+			commitCommand.setDefaultClean(false);
+		}
+		if (allowEmptyMessage != null) {
+			commitCommand.setAllowEmptyMessage(allowEmptyMessage.booleanValue());
 		}
 
 		commitCommand.setAuthor(authorIdent);

@@ -86,4 +86,31 @@ public class CommitHookOperationTest extends CommitHookTestCase {
 		org.junit.Assert.assertEquals(operation.getCommit(), db.resolve("HEAD"));
 	}
 
+	@org.junit.Test
+	public void legacyMessageDefaultPreservesItsExistingBehavior() throws Exception {
+		CommitOperation operation = new CommitOperation(db, TestUtils.AUTHOR,
+				TestUtils.COMMITTER, "\nlegacy  ");
+		operation.execute(new NullProgressMonitor());
+		org.junit.Assert.assertEquals("legacy  ", operation.getCommit().getFullMessage());
+	}
+
+	@org.junit.Test
+	public void commitAllForwardsNativeMessageCleanup() throws Exception {
+		hook("prepare-commit-msg", "printf 'prepared  ' >\"$1\"\n");
+		writeTrashFile("file", "all tracked changes\n");
+		CommitOperation operation = new CommitOperation(db, TestUtils.AUTHOR,
+				TestUtils.COMMITTER, "input");
+		operation.setCommitAll(true);
+		operation.setUseNativeMessageCleanup(true);
+		operation.setAllowEmptyMessage(false);
+		operation.execute(new NullProgressMonitor());
+		org.junit.Assert.assertEquals("prepared\n", operation.getCommit().getFullMessage());
+		try (org.eclipse.jgit.treewalk.TreeWalk tree = org.eclipse.jgit.treewalk.TreeWalk
+				.forPath(db, "file", operation.getCommit().getTree())) {
+			org.junit.Assert.assertNotNull(tree);
+			org.junit.Assert.assertEquals("all tracked changes\n",
+					new String(db.open(tree.getObjectId(0)).getBytes(), java.nio.charset.StandardCharsets.UTF_8));
+		}
+	}
+
 }

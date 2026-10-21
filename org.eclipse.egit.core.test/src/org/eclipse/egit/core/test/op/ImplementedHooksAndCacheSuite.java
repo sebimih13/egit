@@ -27,7 +27,7 @@ import org.junit.runners.Suite;
 		PushToCheckoutPushOperationTest.class,
 		ConfiguredHookOperationTest.class, PrepareCommitMsgOperationTest.class,
 		CommitOperationHookTrace2Test.class, IndexSkipHashOperationTest.class,
-		CommitHookOperationTest.class, CommitEmptyTreeOperationTest.class, PrePushHookOperationTest.class,
+		CommitHookOperationTest.class, NativeCommitMessageOperationTest.class, CommitEmptyTreeOperationTest.class, PrePushHookOperationTest.class,
 		NativePushDefaultOperationTest.class,
 		org.eclipse.egit.core.internal.indexdiff.NativeCacheIndexDiffTest.class,
 		org.eclipse.egit.core.internal.indexdiff.FsMonitorIndexDiffCacheTest.class,
