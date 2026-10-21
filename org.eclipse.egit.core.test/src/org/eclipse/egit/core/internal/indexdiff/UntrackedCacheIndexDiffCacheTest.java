@@ -38,22 +38,37 @@ public class UntrackedCacheIndexDiffCacheTest extends GitTestCase {
 	@Test
 	public void nativeVersion2CacheSurvivesFullAndIncrementalRefresh()
 			throws Exception {
-		checkNativeCache("2");
+		checkNativeCache("2", "all");
 	}
 
 	@Test
 	public void nativeVersion3CacheSurvivesFullAndIncrementalRefresh()
 			throws Exception {
-		checkNativeCache("3");
+		checkNativeCache("3", "all");
 	}
 
 	@Test
 	public void nativeVersion4CacheSurvivesFullAndIncrementalRefresh()
 			throws Exception {
-		checkNativeCache("4");
+		checkNativeCache("4", "all");
 	}
 
-	private void checkNativeCache(String version) throws Exception {
+	@Test
+	public void nativeNormalModeVersion2SummariesSurviveRefresh() throws Exception {
+		checkNativeCache("2", "normal");
+	}
+
+	@Test
+	public void nativeNormalModeVersion3SummariesSurviveRefresh() throws Exception {
+		checkNativeCache("3", "normal");
+	}
+
+	@Test
+	public void nativeNormalModeVersion4SummariesSurviveRefresh() throws Exception {
+		checkNativeCache("4", "normal");
+	}
+
+	private void checkNativeCache(String version, String mode) throws Exception {
 		assumeFalse(SystemReader.getInstance().isWindows());
 		Path directory = Files.createTempDirectory("egit-untracked-interop-");
 		TestRepository fixture = new TestRepository(
@@ -71,6 +86,7 @@ public class UntrackedCacheIndexDiffCacheTest extends GitTestCase {
 			Files.writeString(directory.resolve("directory/first"), "new");
 			Files.writeString(directory.resolve("hidden.tmp"), "ignored");
 			nativeGit(repository, "config", "core.untrackedCache", "true");
+			nativeGit(repository, "config", "status.showUntrackedFiles", mode);
 			nativeGit(repository, "update-index", "--untracked-cache");
 			if ("3".equals(version)) {
 				nativeGit(repository, "update-index", "--skip-worktree",
@@ -81,13 +97,20 @@ public class UntrackedCacheIndexDiffCacheTest extends GitTestCase {
 			// tick.
 			Thread.sleep(1100);
 			nativeGit(repository, "status", "--porcelain=v1", "-z",
-					"--untracked-files=all");
+					"--untracked-files=" + mode);
 			nativeGit(repository, "status", "--porcelain=v1", "-z",
-					"--untracked-files=all");
+					"--untracked-files=" + mode);
+			byte[] populated = repository.readDirCache().getUntrackedCache().write();
+			nativeGit(repository, "status", "--porcelain=v1", "-z",
+					"--untracked-files=" + ("all".equals(mode) ? "normal" : "all"));
+			assertArrayEquals("Native mode bypass must preserve UNTR summaries",
+					populated, repository.readDirCache().getUntrackedCache().write());
 			repository.getConfig().load();
 			repository.getConfig().setBoolean("jgit", null, "fsmonitorCache",
 					false);
 			assertNotNull(repository.readDirCache().getUntrackedCache());
+			assertEquals("all".equals(mode) ? 0 : 6,
+					repository.readDirCache().getUntrackedCache().dirFlags);
 			byte[] index = Files
 					.readAllBytes(repository.getIndexFile().toPath());
 			assertEquals(Integer.parseInt(version),
@@ -103,6 +126,8 @@ public class UntrackedCacheIndexDiffCacheTest extends GitTestCase {
 				assertPaths(entry.getIndexDiff(), "directory/first");
 				assertArrayEquals(index,
 						Files.readAllBytes(repository.getIndexFile().toPath()));
+				assertArrayEquals(populated,
+						repository.readDirCache().getUntrackedCache().write());
 			}
 			Files.move(directory.resolve("directory/first"),
 					directory.resolve("directory/renamed"));
@@ -146,7 +171,8 @@ public class UntrackedCacheIndexDiffCacheTest extends GitTestCase {
 	private static byte[] nativeGit(Repository repository, String... arguments)
 			throws Exception {
 		List<String> command = new ArrayList<>(
-				List.of("git", "-c", "core.fsmonitor=false"));
+				List.of(System.getProperty("jgit.test.gitExecutable", "git"),
+						"-c", "core.fsmonitor=false"));
 		command.addAll(List.of(arguments));
 		ProcessBuilder builder = new ProcessBuilder(command)
 				.directory(repository.getWorkTree());
