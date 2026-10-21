@@ -26,8 +26,12 @@ public class NativeCommitMessageOperationTest extends NativeCommitMessageTestCas
 	@Override
 	protected RevCommit commitMessage(String message, CleanupMode cleanup, boolean noVerify,
 			boolean allowEmptyMessage) throws Exception {
-		CommitOperation operation = new CommitOperation(db, TestUtils.AUTHOR, TestUtils.COMMITTER, message);
+		boolean amending = scenario.contains("amend-reuse");
+		CommitOperation operation = new CommitOperation(db,
+				amending ? initial.getAuthorIdent().toExternalString() : TestUtils.AUTHOR, TestUtils.COMMITTER, message);
+		operation.setAmending(amending);
 		operation.setUseNativeMessageCleanup(true);
+		operation.setCommitAll(scenario.equals("cherry-all-repository-message"));
 		operation.setCleanupMode(cleanup);
 		operation.setAllowEmptyMessage(allowEmptyMessage);
 		operation.setNoVerify(noVerify);

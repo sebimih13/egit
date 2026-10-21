@@ -125,7 +125,7 @@ public class CommitOperation implements IEGitOperation {
 			String author, String committer, String message) throws CoreException {
 		this.author = author;
 		this.committer = committer;
-		this.originalMessage = message == null ? "" : message; //$NON-NLS-1$
+		this.originalMessage = message;
 		this.message = stripLeadingWhitespace(message);
 		if (filesToCommit != null && filesToCommit.length > 0)
 			setRepository(filesToCommit[0]);
@@ -154,7 +154,7 @@ public class CommitOperation implements IEGitOperation {
 		this.repo = repository;
 		this.author = author;
 		this.committer = committer;
-		this.originalMessage = message == null ? "" : message; //$NON-NLS-1$
+		this.originalMessage = message;
 		this.message = stripLeadingWhitespace(message);
 		if (filesToCommit != null)
 			commitFileList = new HashSet<>(filesToCommit);
@@ -175,7 +175,7 @@ public class CommitOperation implements IEGitOperation {
 		this.repo = repository;
 		this.author = author;
 		this.committer = committer;
-		this.originalMessage = message == null ? "" : message; //$NON-NLS-1$
+		this.originalMessage = message;
 		this.message = stripLeadingWhitespace(message);
 		this.commitIndex = true;
 	}
