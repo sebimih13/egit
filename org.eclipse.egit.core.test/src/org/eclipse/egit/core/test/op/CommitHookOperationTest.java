@@ -31,6 +31,7 @@ public class CommitHookOperationTest extends CommitHookTestCase {
 		CommitOperation operation = new CommitOperation(db, TestUtils.AUTHOR,
 				TestUtils.COMMITTER, "first");
 		operation.setNoVerify(noVerify);
+		operation.setHookPrefix(hookPrefix);
 		operation.execute(new NullProgressMonitor());
 		return operation.getCommit();
 	}
@@ -44,6 +45,7 @@ public class CommitHookOperationTest extends CommitHookTestCase {
 				TestUtils.COMMITTER, "all tracked changes");
 		operation.setCommitAll(true);
 		operation.setNoVerify(true);
+		operation.setHookPrefix(hookPrefix);
 		operation.execute(new NullProgressMonitor());
 		org.junit.Assert.assertEquals(initial,
 				operation.getCommit().getParent(0));
@@ -56,6 +58,32 @@ public class CommitHookOperationTest extends CommitHookTestCase {
 		}
 		org.junit.Assert.assertFalse(java.nio.file.Files
 				.exists(db.getDirectory().toPath().resolve("commit-all-hook")));
+	}
+
+	@Override
+	protected RevCommit commitAs(org.eclipse.jgit.lib.PersonIdent author,
+			boolean amend) throws Exception {
+		String identity = author != null ? author.toExternalString()
+				: amend ? initial.getAuthorIdent().toExternalString()
+						: TestUtils.AUTHOR;
+		CommitOperation operation = new CommitOperation(db, identity,
+				TestUtils.COMMITTER, "author test");
+		operation.setAmending(amend);
+		operation.setHookPrefix(hookPrefix);
+		operation.execute(new NullProgressMonitor());
+		return operation.getCommit();
+	}
+
+	@org.junit.Test
+	public void commitAllForwardsInvocationPrefix() throws Exception {
+		hook("pre-commit", "test \"$GIT_PREFIX\" = success/\n");
+		writeTrashFile("file", "all changes\n");
+		CommitOperation operation = new CommitOperation(db, TestUtils.AUTHOR,
+				TestUtils.COMMITTER, "commit all with prefix");
+		operation.setCommitAll(true);
+		operation.setHookPrefix("success/");
+		operation.execute(new NullProgressMonitor());
+		org.junit.Assert.assertEquals(operation.getCommit(), db.resolve("HEAD"));
 	}
 
 }

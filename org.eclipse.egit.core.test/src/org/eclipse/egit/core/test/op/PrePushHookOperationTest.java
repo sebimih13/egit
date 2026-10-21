@@ -74,4 +74,33 @@ public class PrePushHookOperationTest extends PrePushHookTestCase {
 		org.junit.Assert.assertEquals(next, server.resolve("refs/heads/main"));
 	}
 
+	@org.junit.Test
+	public void explicitUpstreamPolicyOverridesConfiguredCurrent()
+			throws Exception {
+		db.getConfig().setString("push", null, "default", "current");
+		db.getConfig().setString("branch", "main", "remote", "parent1");
+		db.getConfig().setString("branch", "main", "merge",
+				"refs/heads/foreign");
+		db.getConfig().save();
+		PushOperation operation = new PushOperation(db, "parent1", false, 0);
+		operation.setPushDefault(
+				org.eclipse.jgit.transport.PushConfig.PushDefault.UPSTREAM);
+		operation.run(new NullProgressMonitor());
+		org.junit.Assert.assertEquals(next,
+				server.resolve("refs/heads/foreign"));
+		org.junit.Assert.assertNull(server.exactRef("refs/heads/main"));
+	}
+
+	@org.junit.Test
+	public void explicitCurrentPolicyOverridesConfiguredUpstream()
+			throws Exception {
+		db.getConfig().setString("push", null, "default", "upstream");
+		db.getConfig().save();
+		PushOperation operation = new PushOperation(db, "parent1", false, 0);
+		operation.setPushDefault(
+				org.eclipse.jgit.transport.PushConfig.PushDefault.CURRENT);
+		operation.run(new NullProgressMonitor());
+		org.junit.Assert.assertEquals(next, server.resolve("refs/heads/main"));
+	}
+
 }

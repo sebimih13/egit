@@ -81,6 +81,10 @@ public class CommitOperation implements IEGitOperation {
 
 	private boolean noVerify;
 
+	private Boolean allowEmpty;
+
+	private String hookPrefix = ""; //$NON-NLS-1$
+
 	private boolean commitAll = false;
 
 	private boolean sign = false;
@@ -263,7 +267,7 @@ public class CommitOperation implements IEGitOperation {
 			setAuthorAndCommitter(commitCommand);
 			commitCommand.setAmend(amending)
 					.setNoPostRewrite(noPostRewrite)
-					.setNoVerify(noVerify)
+					.setNoVerify(noVerify).setHookPrefix(hookPrefix)
 					.setMessage(message)
 					.setInsertChangeId(createChangeId);
 			if (!commitIndex)
@@ -294,6 +298,26 @@ public class CommitOperation implements IEGitOperation {
 	 */
 	public void setNoPostRewrite(boolean noPostRewrite) {
 		this.noPostRewrite = noPostRewrite;
+	}
+
+	/**
+	 * Select an explicit empty-commit policy. If unset, retain the operation's
+	 * existing JGit default, which permits empty commits.
+	 * @param allowEmpty whether an empty tree change is allowed
+	 * @since 7.8
+	 */
+	public void setAllowEmpty(boolean allowEmpty) {
+		this.allowEmpty = Boolean.valueOf(allowEmpty);
+	}
+
+	/**
+	 * Set the invocation directory reported to commit hooks as GIT_PREFIX.
+	 * @param prefix repository-relative directory including trailing slash;
+	 *            null or empty for a root invocation
+	 * @since 7.8
+	 */
+	public void setHookPrefix(String prefix) {
+		hookPrefix = prefix == null ? "" : prefix; //$NON-NLS-1$
 	}
 
 	/**
@@ -345,7 +369,7 @@ public class CommitOperation implements IEGitOperation {
 			setAuthorAndCommitter(commitCommand);
 			commit = commitCommand.setAll(true).setAmend(amending)
 					.setNoPostRewrite(noPostRewrite)
-					.setNoVerify(noVerify).setMessage(message)
+					.setNoVerify(noVerify).setHookPrefix(hookPrefix).setMessage(message)
 					.setInsertChangeId(createChangeId).call();
 		} catch (JGitInternalException e) {
 			throw new TeamException(CoreText.MergeOperation_InternalError, e);
@@ -395,6 +419,10 @@ public class CommitOperation implements IEGitOperation {
 				authorIdent = new PersonIdent(enteredAuthor,
 						headAuthor.getWhen(), headAuthor.getTimeZone());
 			}
+		}
+
+		if (allowEmpty != null) {
+			commitCommand.setAllowEmpty(allowEmpty.booleanValue());
 		}
 
 		commitCommand.setAuthor(authorIdent);
