@@ -27,6 +27,7 @@ import org.eclipse.egit.core.test.TestRepository;
 import org.eclipse.egit.core.test.TestUtils;
 import org.eclipse.jgit.api.Git;
 import org.eclipse.jgit.lib.Repository;
+import org.eclipse.jgit.junit.NativeUntrackedCacheSnapshots;
 import org.eclipse.jgit.util.FileUtils;
 import org.eclipse.jgit.util.SystemReader;
 import org.junit.Test;
@@ -66,6 +67,57 @@ public class UntrackedCacheIndexDiffCacheTest extends GitTestCase {
 	@Test
 	public void nativeNormalModeVersion4SummariesSurviveRefresh() throws Exception {
 		checkNativeCache("4", "normal");
+	}
+
+	@Test
+	public void originalNativeDumpCheckpointsSurviveCacheRefresh()
+			throws Exception {
+		for (int checkpoint : NativeUntrackedCacheSnapshots.checkpoints()) {
+			Path directory = Files.createTempDirectory("egit-t7063-snapshot-");
+			TestRepository fixture = new TestRepository(
+					directory.resolve(".git").toFile());
+			Repository repository = fixture.getRepository();
+			IndexDiffCacheEntry entry = null;
+			try {
+				repository.getConfig().setBoolean("core", null,
+						"untrackedCache", true);
+				repository.getConfig().setBoolean("jgit", null,
+						"fsmonitorCache", false);
+				byte[] index = NativeUntrackedCacheSnapshots.install(repository,
+						checkpoint);
+				Files.writeString(directory.resolve("loose"), "untracked");
+				entry = new IndexDiffCacheEntry(repository, null);
+				waitForJobs();
+				assertEquals(Set.of("loose"), entry.getIndexDiff().getUntracked());
+				Set<String> indexed = new java.util.TreeSet<>();
+				var cache = repository.readDirCache();
+				for (int i = 0; i < cache.getEntryCount(); i++)
+					indexed.add(cache.getEntry(i).getPathString());
+				assertEquals(indexed, entry.getIndexDiff().getAdded());
+				NativeUntrackedCacheSnapshots.assertStored(repository, checkpoint);
+				assertArrayEquals(index,
+						Files.readAllBytes(repository.getIndexFile().toPath()));
+				Files.move(directory.resolve("loose"), directory.resolve("renamed"));
+				entry.refreshFiles(List.of("loose", "renamed"));
+				waitForJobs();
+				assertEquals(Set.of("renamed"), entry.getIndexDiff().getUntracked());
+				entry.refresh();
+				waitForJobs();
+				assertEquals(Set.of("renamed"), entry.getIndexDiff().getUntracked());
+				assertEquals(indexed, entry.getIndexDiff().getAdded());
+				NativeUntrackedCacheSnapshots.assertStored(repository, checkpoint);
+				assertArrayEquals(index,
+						Files.readAllBytes(repository.getIndexFile().toPath()));
+			} finally {
+				if (entry != null) {
+					entry.dispose();
+					waitForJobs();
+				}
+				fixture.dispose();
+				FileUtils.delete(directory.toFile(),
+						FileUtils.RECURSIVE | FileUtils.RETRY);
+			}
+		}
 	}
 
 	private void checkNativeCache(String version, String mode) throws Exception {

@@ -52,7 +52,10 @@ public class NativeIndexVersionOperationTest extends GitTestCase {
 					environmentVersion, expectedVersion, manyFiles);
 			((MockSystemReader) SystemReader.getInstance()).setProperty("GIT_INDEX_VERSION",
 					environmentVersion);
-			new AddToIndexOperation(new IResource[] { file }).execute(null);
+			try (var warnings = NativeIndexVersionSupport.captureWarnings()) {
+				new AddToIndexOperation(new IResource[] { file }).execute(null);
+				warnings.assertInitial(configuredVersion, environmentVersion);
+			}
 			NativeIndexVersionSupport.assertMatches(repository, nativeIndex, expectedVersion, manyFiles);
 			repository.getConfig().setInt("index", null, "version", 1);
 			repository.getConfig().save();
@@ -61,7 +64,10 @@ public class NativeIndexVersionOperationTest extends GitTestCase {
 					"restaged content\n".getBytes(java.nio.charset.StandardCharsets.UTF_8)),
 					true, false, null);
 			NativeIndexVersionSupport.nativeRestage(repository, expectedVersion, manyFiles);
-			new AddToIndexOperation(new IResource[] { file }).execute(null);
+			try (var warnings = NativeIndexVersionSupport.captureWarnings()) {
+				new AddToIndexOperation(new IResource[] { file }).execute(null);
+				warnings.assertNone();
+			}
 			NativeIndexVersionSupport.assertMatches(repository, nativeIndex, expectedVersion, manyFiles);
 		} finally {
 			fixture.dispose();

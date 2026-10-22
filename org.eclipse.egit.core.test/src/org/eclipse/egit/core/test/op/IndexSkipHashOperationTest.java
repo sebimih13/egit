@@ -30,6 +30,7 @@ import org.eclipse.egit.core.test.GitTestCase;
 import org.eclipse.egit.core.test.TestRepository;
 import org.eclipse.egit.core.test.TestUtils;
 import org.eclipse.jgit.api.Git;
+import org.eclipse.jgit.junit.NativeIndexVersionSupport;
 import org.eclipse.jgit.lib.Constants;
 import org.eclipse.jgit.lib.Repository;
 import org.junit.After;
@@ -108,6 +109,7 @@ public class IndexSkipHashOperationTest extends GitTestCase {
 		stage();
 		footer(repository, true);
 		assertEquals(1, repository.readDirCache().getEntryCount());
+		NativeIndexVersionSupport.assertNativeFsck(repository);
 	}
 
 	@Test
@@ -187,6 +189,7 @@ public class IndexSkipHashOperationTest extends GitTestCase {
 				footer(child, true);
 				footer(repository, false);
 				assertEquals(1, child.readDirCache().getEntryCount());
+				NativeIndexVersionSupport.assertNativeFsck(child);
 			}
 		} finally {
 			if (imported != null && imported.exists())
