@@ -33,6 +33,49 @@ import org.junit.Test;
 
 public class FsMonitorIndexDiffCacheTest extends GitTestCase {
 	@Test
+	public void untrackedCachePolicyMatchesNativeConfigurationAndRefresh()
+			throws Exception {
+		try (MonitoredFixture f = new MonitoredFixture(inclusiveHook())) {
+			Files.writeString(f.isolatedDirectory.resolve("loose"),
+					"untracked");
+			for (boolean manyFiles : new boolean[] { false, true }) {
+				for (boolean existing : new boolean[] { false, true }) {
+					for (String value : org.eclipse.jgit.junit.NativeFsMonitorWorkloadSupport.UNTRACKED_SETTINGS) {
+						boolean expected = org.eclipse.jgit.junit.NativeFsMonitorWorkloadSupport
+								.nativeUntrackedCachePolicy(f.repository,
+										manyFiles, value, existing);
+						f.repository.getConfig().setBoolean("feature", null,
+								"manyFiles", manyFiles);
+						if (value == null)
+							f.repository.getConfig().unset("core", null,
+									"untrackedCache");
+						else
+							f.repository.getConfig().setString("core", null,
+									"untrackedCache", value);
+						String row = "manyFiles=" + manyFiles + ", existing="
+								+ existing + ", value=" + value;
+						org.junit.Assert.assertEquals(row, expected,
+								org.eclipse.jgit.util.FsMonitor
+										.isUntrackedCacheEnabled(f.repository,
+												null));
+						stagingRefresh(f.entry);
+						IndexDiffData first = f.entry.getIndexDiff();
+						stagingRefresh(f.entry);
+						IndexDiffData second = f.entry.getIndexDiff();
+						org.junit.Assert.assertEquals(row,
+								java.util.Set.of("loose"),
+								second.getUntracked());
+						if (expected)
+							assertSame(row, first, second);
+						else
+							assertNotSame(row, first, second);
+					}
+				}
+			}
+		}
+	}
+
+	@Test
 	public void stagingRefreshJobKeepsTracingOpenAndRevalidatesMonitorState()
 			throws Exception {
 		try (MonitoredFixture f = new MonitoredFixture(inclusiveHook())) {

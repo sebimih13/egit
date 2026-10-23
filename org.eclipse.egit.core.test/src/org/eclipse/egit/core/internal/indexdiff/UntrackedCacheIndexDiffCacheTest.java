@@ -27,6 +27,7 @@ import org.eclipse.egit.core.test.TestRepository;
 import org.eclipse.egit.core.test.TestUtils;
 import org.eclipse.jgit.api.Git;
 import org.eclipse.jgit.lib.Repository;
+import org.eclipse.jgit.junit.NativeFsMonitorWorkloadSupport;
 import org.eclipse.jgit.junit.NativeUntrackedCacheSnapshots;
 import org.eclipse.jgit.util.FileUtils;
 import org.eclipse.jgit.util.SystemReader;
@@ -36,6 +37,179 @@ import org.junit.Test;
  * Index interoperability tests; they do not assert directory scan avoidance.
  */
 public class UntrackedCacheIndexDiffCacheTest extends GitTestCase {
+	@Test
+	public void pathCheckoutRetainsNativeIndexReplacementCache() throws Exception {
+		TestRepository fixture = new TestRepository(new java.io.File(
+				project.getProject().getLocation().toFile(), ".git"));
+		try {
+			fixture.connect(project.getProject());
+			Repository repository = fixture.getRepository();
+			for (String mode : List.of("normal", "all")) {
+				var scenario = org.eclipse.jgit.junit.NativeUntrackedCheckoutSupport.prepare(repository, mode, "two");
+				try (var reader = repository.newObjectReader(); var tree = org.eclipse.jgit.treewalk.TreeWalk.forPath(
+						reader, "two", scenario.target().getTree())) {
+					NativeFsMonitorWorkloadSupport.nativeUntrackedIndexMutation(repository, null,
+							"--cacheinfo", "100644," + tree.getObjectId(0).name() + ",two");
+				}
+				project.getProject().refreshLocal(org.eclipse.core.resources.IResource.DEPTH_INFINITE, null);
+				new org.eclipse.egit.core.op.DiscardChangesOperation(
+						new org.eclipse.core.resources.IResource[] { project.getProject().getFile("two") },
+						scenario.target().name()).execute(null);
+				org.eclipse.jgit.junit.NativeUntrackedCheckoutSupport.assertResult(repository, scenario, false);
+			}
+		} finally {
+			fixture.dispose();
+		}
+	}
+
+	@Test
+	public void unchangedBranchCheckoutPreservesNativeCache() throws Exception {
+		TestRepository fixture = new TestRepository(new java.io.File(
+				project.getProject().getLocation().toFile(), ".git"));
+		try {
+			fixture.connect(project.getProject());
+			Repository repository = fixture.getRepository();
+			for (String mode : List.of("normal", "all")) {
+				var scenario = org.eclipse.jgit.junit.NativeUntrackedCheckoutSupport.prepare(repository, mode, "two");
+				NativeFsMonitorWorkloadSupport.nativeUntrackedReadTree(repository, scenario.base().getTree());
+				new org.eclipse.egit.core.op.BranchOperation(repository, scenario.base().name()).execute(null);
+				NativeFsMonitorWorkloadSupport.assertNativeUntrackedCachePolicy(repository);
+				assertTrue(repository.readDirCache().getUntrackedCache().root.valid);
+				assertEquals(scenario.base(), repository.resolve("HEAD"));
+			}
+		} finally {
+			fixture.dispose();
+		}
+	}
+
+	@Test
+	public void rejectedBranchCheckoutPreservesIndexAndUserChanges() throws Exception {
+		TestRepository fixture = new TestRepository(new java.io.File(
+				project.getProject().getLocation().toFile(), ".git"));
+		try {
+			fixture.connect(project.getProject());
+			Repository repository = fixture.getRepository();
+			for (String mode : List.of("normal", "all")) {
+				for (String path : List.of("two", "sub/tracked")) {
+					var scenario = org.eclipse.jgit.junit.NativeUntrackedCheckoutSupport.prepare(repository, mode, path);
+					byte[] index = Files.readAllBytes(repository.getIndexFile().toPath());
+					Files.writeString(repository.getWorkTree().toPath().resolve(path), "user\n");
+					NativeFsMonitorWorkloadSupport.nativeUntrackedCheckoutRejected(repository, scenario.target());
+					var operation = new org.eclipse.egit.core.op.BranchOperation(repository, scenario.target().name());
+					operation.execute(null);
+					assertEquals(org.eclipse.jgit.api.CheckoutResult.Status.CONFLICTS,
+							operation.getResult(repository).getStatus());
+					assertArrayEquals(index, Files.readAllBytes(repository.getIndexFile().toPath()));
+					assertEquals(scenario.base(), repository.resolve("HEAD"));
+					assertEquals("user\n", Files.readString(repository.getWorkTree().toPath().resolve(path)));
+				}
+			}
+		} finally {
+			fixture.dispose();
+		}
+	}
+
+	@Test
+	public void branchCheckoutMatchesNativeUnpackTreeInvalidation() throws Exception {
+		TestRepository fixture = new TestRepository(new java.io.File(
+				project.getProject().getLocation().toFile(), ".git"));
+		try {
+			fixture.connect(project.getProject());
+			Repository repository = fixture.getRepository();
+			for (String mode : List.of("normal", "all")) {
+				for (String path : List.of("two", "sub/tracked")) {
+					var scenario = org.eclipse.jgit.junit.NativeUntrackedCheckoutSupport.prepare(repository, mode, path);
+					NativeFsMonitorWorkloadSupport.nativeUntrackedReadTree(repository, scenario.target().getTree());
+					new org.eclipse.egit.core.op.BranchOperation(repository, scenario.target().name()).execute(null);
+					org.eclipse.jgit.junit.NativeUntrackedCheckoutSupport.assertResult(repository, scenario, true);
+					assertTrue("Checkout keeps the tracked Eclipse project", project.getProject().isOpen());
+				}
+			}
+		} finally {
+			fixture.dispose();
+		}
+	}
+
+	@Test
+	public void stagingNewPathPreservesUnchangedNativeCacheDirectories() throws Exception {
+		checkSelectiveIndexMutation(23, false, 24);
+	}
+
+	@Test
+	public void untrackingPreservesUnchangedNativeCacheDirectories() throws Exception {
+		checkSelectiveIndexMutation(20, true, 21);
+	}
+
+	@Test
+	public void restagingExistingPathPreservesNativeCachePayload() throws Exception {
+		checkSelectiveIndexMutation(20, false, 20);
+	}
+
+	private void checkSelectiveIndexMutation(int checkpoint, boolean remove, int expected)
+			throws Exception {
+		var file = testUtils.addFileToProject(project.getProject(), "two", "");
+		TestRepository fixture = new TestRepository(new java.io.File(
+				project.getProject().getLocation().toFile(), ".git"));
+		try {
+			fixture.connect(project.getProject());
+			Repository repository = fixture.getRepository();
+			repository.getConfig().setBoolean("feature", null, "manyFiles", false);
+			repository.getConfig().setString("core", null, "untrackedCache", "keep");
+			NativeUntrackedCacheSnapshots.install(repository, checkpoint);
+			if (remove) {
+				NativeFsMonitorWorkloadSupport.nativeUntrackedIndexMutation(repository,
+						null, "--force-remove", "two");
+				new org.eclipse.egit.core.op.UntrackOperation(List.of(file)).execute(null);
+			} else {
+				NativeFsMonitorWorkloadSupport.nativeUntrackedIndexMutation(repository,
+						null, "--add", "--cacheinfo",
+						"100644," + org.eclipse.jgit.lib.Constants.EMPTY_BLOB_ID.name() + ",two");
+				new org.eclipse.egit.core.op.AddToIndexOperation(
+						new org.eclipse.core.resources.IResource[] { file }).execute(null);
+			}
+			NativeFsMonitorWorkloadSupport.assertNativeUntrackedCachePolicy(repository);
+			NativeUntrackedCacheSnapshots.assertNativeDump(
+					repository.readDirCache().getUntrackedCache(), expected);
+			org.junit.Assert.assertEquals(!remove,
+					repository.readDirCache().getEntry("two") != null);
+			assertTrue("The index operation keeps the working file", file.exists());
+		} finally {
+			fixture.dispose();
+		}
+	}
+
+	@Test
+	public void stagingAppliesNativeUntrackedCachePolicy() throws Exception {
+		var file = testUtils.addFileToProject(project.getProject(), "policy", "content");
+		TestRepository fixture = new TestRepository(new java.io.File(
+				project.getProject().getLocation().toFile(), ".git"));
+		try {
+			fixture.connect(project.getProject());
+			Repository repository = fixture.getRepository();
+			for (boolean manyFiles : new boolean[] { false, true }) {
+				for (boolean existing : new boolean[] { false, true }) {
+					for (String value : NativeFsMonitorWorkloadSupport.UNTRACKED_SETTINGS) {
+						NativeFsMonitorWorkloadSupport
+								.nativeUntrackedCachePolicy(repository, manyFiles, value, existing);
+						repository.getConfig().setBoolean("feature", null, "manyFiles", manyFiles);
+						if (value == null)
+							repository.getConfig().unset("core", null, "untrackedCache");
+						else
+							repository.getConfig().setString("core", null, "untrackedCache", value);
+						new org.eclipse.egit.core.op.AddToIndexOperation(
+								new org.eclipse.core.resources.IResource[] { file }).execute(null);
+						NativeFsMonitorWorkloadSupport
+								.assertNativeUntrackedCachePolicy(repository);
+						org.junit.Assert.assertEquals("Staged through the EGit operation",
+								"policy", repository.readDirCache().getEntry(0).getPathString());
+					}
+				}
+			}
+		} finally {
+			fixture.dispose();
+		}
+	}
+
 	@Test
 	public void nativeVersion2CacheSurvivesFullAndIncrementalRefresh()
 			throws Exception {
