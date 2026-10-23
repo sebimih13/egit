@@ -38,6 +38,74 @@ import org.junit.Test;
  */
 public class UntrackedCacheIndexDiffCacheTest extends GitTestCase {
 	@Test
+	public void nativeDirectoryListingReusePreservesIgnoredRefreshResults()
+			throws Exception {
+		assumeFalse(SystemReader.getInstance().isWindows());
+		for (String mode : new String[] { "normal", "all" }) {
+			Path directory = Files.createTempDirectory("egit-untracked-listing-");
+			TestRepository fixture = new TestRepository(directory.resolve(".git").toFile());
+			Repository repository = fixture.getRepository();
+			IndexDiffCacheEntry entry = null;
+			try {
+				Files.createDirectories(directory.resolve("sub"));
+				Files.writeString(directory.resolve("sub/.gitignore"), "*.tmp\n");
+				Files.writeString(directory.resolve("sub/hidden.tmp"), "ignored\n");
+				org.eclipse.jgit.junit.NativeUntrackedCheckoutSupport.prepare(repository, mode, "sub/tracked");
+				byte[] index = Files.readAllBytes(repository.getIndexFile().toPath());
+				entry = new IndexDiffCacheEntry(repository, null);
+				waitForJobs();
+				for (int i = 0; i < 3; i++) {
+					entry.refresh();
+					waitForJobs();
+					assertListingStatus(repository, entry.getIndexDiff());
+					assertEquals(Set.of("sub/hidden.tmp"), entry.getIndexDiff().getIgnoredNotInIndex());
+				}
+				Files.writeString(directory.resolve("sub/tracked"), "longer content\n");
+				Files.writeString(directory.resolve("sub/.gitignore"), "\n");
+				entry.refresh();
+				waitForJobs();
+				assertListingStatus(repository, entry.getIndexDiff());
+				assertTrue(entry.getIndexDiff().getIgnoredNotInIndex().isEmpty());
+				Files.writeString(directory.resolve("sub/new"), "new\n");
+				Files.delete(directory.resolve("sub/loose"));
+				entry.refresh();
+				waitForJobs();
+				assertListingStatus(repository, entry.getIndexDiff());
+				assertArrayEquals("Refresh cannot write the native index", index,
+						Files.readAllBytes(repository.getIndexFile().toPath()));
+			} finally {
+				if (entry != null) entry.dispose();
+				waitForJobs();
+				fixture.dispose();
+				FileUtils.delete(directory.toFile(), FileUtils.RECURSIVE | FileUtils.RETRY);
+			}
+		}
+	}
+
+	private void assertListingStatus(Repository repository, IndexDiffData actual)
+			throws Exception {
+		byte[] output = nativeGit(repository, "--no-optional-locks", "status",
+				"--porcelain=v1", "-z", "--untracked-files=all", "--ignored=matching", "--no-renames");
+		Set<String> untracked = new java.util.HashSet<>();
+		Set<String> ignored = new java.util.HashSet<>();
+		Set<String> modified = new java.util.HashSet<>();
+		for (String record : new String(output, StandardCharsets.UTF_8).split("\0")) {
+			if (record.startsWith("?? ")) untracked.add(record.substring(3));
+			else if (record.startsWith("!! ")) ignored.add(record.substring(3));
+			else if (record.startsWith(" M ")) modified.add(record.substring(3));
+			else if (!record.isEmpty()) throw new AssertionError(record);
+		}
+		assertEquals(untracked, actual.getUntracked());
+		assertEquals(ignored, actual.getIgnoredNotInIndex());
+		assertEquals(modified, actual.getModified());
+		assertTrue(actual.getAdded().isEmpty());
+		assertTrue(actual.getChanged().isEmpty());
+		assertTrue(actual.getRemoved().isEmpty());
+		assertTrue(actual.getMissing().isEmpty());
+		assertTrue(actual.getConflicting().isEmpty());
+	}
+
+	@Test
 	public void pathCheckoutRetainsNativeIndexReplacementCache() throws Exception {
 		TestRepository fixture = new TestRepository(new java.io.File(
 				project.getProject().getLocation().toFile(), ".git"));

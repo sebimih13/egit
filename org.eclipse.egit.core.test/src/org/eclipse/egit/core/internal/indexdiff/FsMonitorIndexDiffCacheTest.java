@@ -33,6 +33,41 @@ import org.junit.Test;
 
 public class FsMonitorIndexDiffCacheTest extends GitTestCase {
 	@Test
+	public void versionOneAndAutoFallbackRevalidateStagingRefresh()
+			throws Exception {
+		String script = "[ \"$1\" = 1 ] || exit 1\n"
+				+ "case \"$2\" in *[!0-9]*|'') exit 2;; esac\n"
+				+ "if [ -f .git/monitor-changed ]; then echo /; fi\n";
+		for (boolean explicit : new boolean[] { true, false }) {
+			try (MonitoredFixture f = new MonitoredFixture(script)) {
+				if (explicit)
+					f.repository.getConfig().setInt("core", null,
+							"fsmonitorHookVersion", 1);
+				stagingRefresh(f.entry);
+				IndexDiffData first = f.entry.getIndexDiff();
+				stagingRefresh(f.entry);
+				assertSame(first, f.entry.getIndexDiff());
+				f.change();
+				stagingRefresh(f.entry);
+				IndexDiffData changed = f.entry.getIndexDiff();
+				assertNotSame(first, changed);
+				assertTrue(changed.getUntracked().contains("monitor-new"));
+				Files.delete(f.repository.getDirectory().toPath()
+						.resolve("monitor-changed"));
+				stagingRefresh(f.entry);
+				assertSame(changed, f.entry.getIndexDiff());
+				// Force v2: the v1-only provider now fails, requiring a scan.
+				f.repository.getConfig().setInt("core", null,
+						"fsmonitorHookVersion", 2);
+				Files.delete(f.isolatedDirectory.resolve("monitor-new"));
+				stagingRefresh(f.entry);
+				assertFalse(f.entry.getIndexDiff().getUntracked()
+						.contains("monitor-new"));
+			}
+		}
+	}
+
+	@Test
 	public void untrackedCachePolicyMatchesNativeConfigurationAndRefresh()
 			throws Exception {
 		try (MonitoredFixture f = new MonitoredFixture(inclusiveHook())) {

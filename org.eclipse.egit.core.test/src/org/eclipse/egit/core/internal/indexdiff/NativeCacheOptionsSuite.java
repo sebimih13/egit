@@ -21,7 +21,8 @@ import org.junit.runners.Suite;
  */
 @RunWith(Suite.class)
 @Suite.SuiteClasses({ NativeCacheIndexDiffTest.class,
-		FsMonitorIndexDiffCacheTest.class, UntrackedCacheIndexDiffCacheTest.class,
+		FsMonitorIndexDiffCacheTest.class, FsMonitorIndexStorageTest.class,
+		UntrackedCacheIndexDiffCacheTest.class,
 		PreloadIndexDiffCacheTest.class, IndexSkipHashOperationTest.class,
 		NativeIndexVersionOperationTest.class })
 public class NativeCacheOptionsSuite {
