@@ -350,6 +350,16 @@ public class IndexDiffCacheEntry {
 				}
 			}
 
+			if (FsMonitor.isHookConfigured(repository)
+					&& currentIndex.getFsMonitorCache() != null) {
+				// Provider notifications consumed by the writer may affect
+				// tracked paths outside the staged/untracked entry delta.
+				var dirty = currentIndex.getFsMonitorCache().getDirtyEntries();
+				for (int pos = dirty.nextSetBit(0); pos >= 0;
+						pos = dirty.nextSetBit(pos + 1)) {
+					paths.add(currentIndex.getEntry(pos).getPathString());
+				}
+			}
 			if (!paths.isEmpty())
 				refreshFiles(paths);
 

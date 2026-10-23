@@ -24,6 +24,7 @@ import org.junit.runners.Suite;
 		FsMonitorIndexDiffCacheTest.class, FsMonitorIndexStorageTest.class,
 		FsMonitorIndexQueryOperationTest.class,
 		FsMonitorInitializationOperationTest.class,
+		FsMonitorWriterRefreshOperationTest.class,
 		UntrackedCacheIndexDiffCacheTest.class,
 		PreloadIndexDiffCacheTest.class, IndexSkipHashOperationTest.class,
 		NativeIndexVersionOperationTest.class })

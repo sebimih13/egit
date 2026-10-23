@@ -61,6 +61,7 @@ public class FsMonitorIndexQueryOperationTest extends GitTestCase {
 					"sub");
 			Files.copy(staged.index(), repo.getIndexFile().toPath(),
 					StandardCopyOption.REPLACE_EXISTING);
+			NativeFsMonitorIndexSupport.report(repo);
 			try (Git git = Git.wrap(repo)) {
 				git.commit().setMessage("nested")
 						.setAuthor("Test", "test@example.invalid")
