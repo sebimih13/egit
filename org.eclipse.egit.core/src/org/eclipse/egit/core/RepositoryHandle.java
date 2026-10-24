@@ -105,7 +105,8 @@ class RepositoryHandle extends Repository {
 		listeners.add(list.addIndexChangedListener(event -> {
 			Repository repo = ref.get();
 			if (repo != null) {
-				fireEvent(repo, new IndexChangedEvent(event.isInternal()));
+				fireEvent(repo, new IndexChangedEvent(event.isInternal(),
+						event.getFsMonitorPaths(), event.getIndexChecksum()));
 			}
 		}));
 		listeners.add(list.addRefsChangedListener(event -> {
@@ -342,6 +343,11 @@ class RepositoryHandle extends Repository {
 	@Override
 	public void notifyIndexChanged(boolean internal) {
 		delegate.notifyIndexChanged(internal);
+	}
+
+	@Override
+	public void notifyIndexChanged(IndexChangedEvent event) {
+		delegate.notifyIndexChanged(event);
 	}
 
 	@Override

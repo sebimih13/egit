@@ -45,18 +45,74 @@ public class FsMonitorWriterRefreshOperationTest extends GitTestCase {
 		checkOperations("failure");
 	}
 
+	@Test
+	public void externalWriterCannotLoseUntrackedNotifications() throws Exception {
+		checkOperations("external");
+	}
+
+	@Test
+	public void identicalIndexWriteStillRefreshesConsumedPaths() throws Exception {
+		checkOperations("identical");
+	}
+
+	@Test
+	public void staleEventCannotNarrowNewerIndexRefresh() throws Exception {
+		checkOperations("stale");
+	}
+
 	private void checkOperations(String mode) throws Exception {
 		TestRepository fixture = new TestRepository(new java.io.File(
 				project.getProject().getLocation().toFile(), ".git"));
-		IndexDiffCacheEntry cache = null;
+		CountingEntry cache = null;
 		try {
 			fixture.connect(project.getProject());
 			var repository = fixture.getRepository();
 			NativeFsMonitorIndexSupport.prepare(repository);
+			Files.createDirectories(repository.getDirectory().toPath().resolve("info"));
+			Files.writeString(repository.getDirectory().toPath().resolve("info/exclude"),
+					"hidden\n");
 			project.getProject().refreshLocal(IResource.DEPTH_INFINITE, null);
-			cache = new IndexDiffCacheEntry(repository, null);
+			cache = new CountingEntry(repository);
 			waitForJobs();
 			assertTrue(cache.getIndexDiff().getModified().isEmpty());
+			cache.fullRefreshes = 0;
+			// Do not refresh this resource: only the provider knows it exists.
+			Files.writeString(repository.getWorkTree().toPath().resolve("outside"), "new\n");
+			Files.writeString(repository.getWorkTree().toPath().resolve("hidden"), "ignored\n");
+			if (mode.equals("identical")) {
+				NativeFsMonitorIndexSupport.report(repository, "outside", "hidden");
+				byte[] before = Files.readAllBytes(repository.getIndexFile().toPath());
+				var index = repository.lockDirCache();
+				try {
+					index.write();
+					assertTrue(index.commit());
+				} finally {
+					index.unlock();
+				}
+				waitForJobs();
+				assertArrayEquals(before, Files.readAllBytes(repository.getIndexFile().toPath()));
+				compareStatus(repository, cache.getIndexDiff());
+				assertEquals(0, cache.fullRefreshes);
+				return;
+			}
+			if (mode.equals("external") || mode.equals("stale")) {
+				byte[] oldChecksum = repository.readDirCache().getReadIndexChecksum();
+				NativeFsMonitorIndexSupport.reportToken(repository, "external-clock",
+						"outside", "hidden");
+				var written = NativeFsMonitorIndexSupport.mutate(repository,
+						"update-index", "--force-write-index");
+				Files.copy(written.index(), repository.getIndexFile().toPath(),
+						java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+				NativeFsMonitorIndexSupport.reportToken(repository, "after-external-clock");
+				repository.fireEvent(mode.equals("stale")
+						? new org.eclipse.jgit.events.IndexChangedEvent(true,
+								Set.of(), oldChecksum)
+						: new org.eclipse.jgit.events.IndexChangedEvent(false));
+				waitForJobs();
+				compareStatus(repository, cache.getIndexDiff());
+				assertTrue("External scope is unknown", cache.fullRefreshes > 0);
+				return;
+			}
 			if (mode.equals("paths")) {
 				Path file = repository.getWorkTree().toPath().resolve("a");
 				var time = Files.getLastModifiedTime(file);
@@ -65,13 +121,20 @@ public class FsMonitorWriterRefreshOperationTest extends GitTestCase {
 				Files.writeString(repository.getWorkTree().toPath().resolve("new"), "base\n");
 				var added = project.getProject().getFile("new");
 				added.refreshLocal(IResource.DEPTH_ZERO, null);
-				NativeFsMonitorIndexSupport.reportToken(repository, "first-clock", "a");
+				NativeFsMonitorIndexSupport.reportToken(repository, "first-clock",
+						"a", "outside", "hidden");
 				var expected = NativeFsMonitorIndexSupport.mutate(repository, "add", "new");
 				new AddToIndexOperation(new IResource[] { added }).execute(null);
 				waitForJobs();
 				compare(repository, expected);
 				assertEquals("The staged-path update must include persisted dirty paths",
 						Set.of("a"), cache.getIndexDiff().getModified());
+				assertTrue("Consumed untracked notifications must reach the retained cache",
+						cache.getIndexDiff().getUntracked().contains("outside"));
+				assertTrue("Consumed ignored notifications must reach the retained cache",
+						cache.getIndexDiff().getIgnoredNotInIndex().contains("hidden"));
+				assertEquals("Known notifications must remain incremental: " + cache.fullTrigger, 0,
+						cache.fullRefreshes);
 				Path earlierDirty = repository.getWorkTree().toPath().resolve("m");
 				var earlierTime = Files.getLastModifiedTime(earlierDirty);
 				Files.writeString(earlierDirty, "next\n");
@@ -98,6 +161,22 @@ public class FsMonitorWriterRefreshOperationTest extends GitTestCase {
 			if (cache != null) cache.dispose();
 			waitForJobs();
 			fixture.dispose();
+		}
+	}
+
+	private static class CountingEntry extends IndexDiffCacheEntry {
+		int fullRefreshes;
+		String fullTrigger;
+
+		CountingEntry(org.eclipse.jgit.lib.Repository repository) {
+			super(repository, null);
+		}
+
+		@Override
+		protected void scheduleReloadJob(String trigger) {
+			fullRefreshes++;
+			fullTrigger = trigger;
+			super.scheduleReloadJob(trigger);
 		}
 	}
 

@@ -52,6 +52,41 @@ public class RepositoryCacheTest extends GitTestCase {
 	}
 
 	@Test
+	public void indexNotificationsRetainScopeAcrossRepositoryForwarding()
+			throws Exception {
+		Repository cached = RepositoryCache.INSTANCE.lookupRepository(
+				repository.getDirectory());
+		var globalEvents = new java.util.ArrayList<org.eclipse.jgit.events.IndexChangedEvent>();
+		var handleEvents = new java.util.ArrayList<org.eclipse.jgit.events.IndexChangedEvent>();
+		var global = RepositoryCache.INSTANCE.getGlobalListenerList()
+				.addIndexChangedListener(globalEvents::add);
+		var local = cached.getListenerList().addIndexChangedListener(handleEvents::add);
+		try {
+			var paths = java.util.Set.of("outside", "dir/new");
+			byte[] checksum = new byte[] { 1, 2, 3 };
+			try (Repository separate = new org.eclipse.jgit.storage.file.FileRepositoryBuilder()
+					.setGitDir(repository.getDirectory()).build()) {
+				separate.fireEvent(new org.eclipse.jgit.events.IndexChangedEvent(true, paths, checksum));
+			}
+			assertEquals(1, globalEvents.size());
+			assertEquals(paths, globalEvents.get(0).getFsMonitorPaths());
+			org.junit.Assert.assertArrayEquals(checksum,
+					globalEvents.get(0).getIndexChecksum());
+			assertEquals(cached, globalEvents.get(0).getRepository());
+			// Exercise the handle's delegate-to-handle forwarding separately.
+			cached.notifyIndexChanged(new org.eclipse.jgit.events.IndexChangedEvent(true, paths, checksum));
+			assertEquals(1, handleEvents.size());
+			assertEquals(paths, handleEvents.get(0).getFsMonitorPaths());
+			org.junit.Assert.assertArrayEquals(checksum,
+					handleEvents.get(0).getIndexChecksum());
+			assertEquals(cached, handleEvents.get(0).getRepository());
+		} finally {
+			local.remove();
+			global.remove();
+		}
+	}
+
+	@Test
 	public void shouldNotContainDeletedRepository() throws IOException {
 		RepositoryCache.INSTANCE.lookupRepository(repository.getDirectory());
 		assertThat(repository,

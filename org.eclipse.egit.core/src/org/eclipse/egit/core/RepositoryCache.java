@@ -84,7 +84,8 @@ public enum RepositoryCache {
 				globalListeners.dispatch(event);
 			} else {
 				IndexChangedEvent newEvent = new IndexChangedEvent(
-						event.isInternal());
+						event.isInternal(), event.getFsMonitorPaths(),
+						event.getIndexChecksum());
 				newEvent.setRepository(repo);
 				globalListeners.dispatch(newEvent);
 			}

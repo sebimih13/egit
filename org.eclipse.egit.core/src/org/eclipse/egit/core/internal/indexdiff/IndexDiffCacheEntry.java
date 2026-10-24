@@ -106,7 +106,8 @@ public class IndexDiffCacheEntry {
 
 	private CopyOnWriteArrayList<IndexDiffChangedListener> listeners = new CopyOnWriteArrayList<>();
 
-	private final IndexChangedListener indexChangedListener = event -> refreshIndexDelta();
+	private final IndexChangedListener indexChangedListener = event -> refreshIndexDelta(
+			event.getFsMonitorPaths(), event.getIndexChecksum());
 
 	private final RefsChangedListener refsChangedListener = event -> scheduleReloadJob(
 			"RefsChanged"); //$NON-NLS-1$
@@ -137,6 +138,8 @@ public class IndexDiffCacheEntry {
 
 	private static Semaphore parallelism = new Semaphore(2);
 
+	private final boolean reportIgnored;
+
 	/**
 	 * @param repository
 	 * @param listener
@@ -144,6 +147,19 @@ public class IndexDiffCacheEntry {
 	 */
 	public IndexDiffCacheEntry(Repository repository,
 			@Nullable IndexDiffChangedListener listener) {
+		this(repository, listener, true);
+	}
+
+	/**
+	 * Create a retained status cache with a fixed ignored-reporting mode.
+	 * @param repository repository to observe
+	 * @param listener optional result listener
+	 * @param reportIgnored whether ignored paths are required; false permits
+	 *            native untracked-directory reuse on complete scans
+	 */
+	public IndexDiffCacheEntry(Repository repository,
+			@Nullable IndexDiffChangedListener listener, boolean reportIgnored) {
+		this.reportIgnored = reportIgnored;
 		this.repositoryGitDir = repository.getDirectory();
 		this.repositoryName = RepositoryUtil.INSTANCE
 				.getRepositoryName(repository);
@@ -318,8 +334,11 @@ public class IndexDiffCacheEntry {
 	 * events
 	 *
 	 * For bare repositories this does nothing.
+	 *
+	 * @param monitorPaths consumed worktree paths, or null for unknown scope
+	 * @param indexChecksum checksum correlating the paths to the written index
 	 */
-	private void refreshIndexDelta() {
+	private void refreshIndexDelta(Set<String> monitorPaths, byte[] indexChecksum) {
 		Repository repository = getRepository();
 		if (repository == null || repository.isBare()) {
 			return;
@@ -331,12 +350,24 @@ public class IndexDiffCacheEntry {
 
 			lastIndex = currentIndex;
 
+			if (FsMonitor.isHookConfigured(repository) && (monitorPaths == null
+					|| !java.util.Arrays.equals(indexChecksum,
+							currentIndex.getReadIndexChecksum()))) {
+				// External or uncorrelated writers cannot supply the consumed
+				// untracked/ignored notification scope.
+				refresh();
+				return;
+			}
+
 			if (oldIndex == null) {
 				refresh(); // full refresh in case we have no data to compare.
 				return;
 			}
 
 			Set<String> paths = new TreeSet<>();
+			if (FsMonitor.isHookConfigured(repository) && monitorPaths != null) {
+				paths.addAll(monitorPaths);
+			}
 			try (TreeWalk walk = new TreeWalk(repository)) {
 				walk.addTree(new DirCacheIterator(oldIndex));
 				walk.addTree(new DirCacheIterator(currentIndex));
@@ -352,14 +383,13 @@ public class IndexDiffCacheEntry {
 
 			if (FsMonitor.isHookConfigured(repository)
 					&& currentIndex.getFsMonitorCache() != null) {
-				// Provider notifications consumed by the writer may affect
-				// tracked paths outside the staged/untracked entry delta.
 				var dirty = currentIndex.getFsMonitorCache().getDirtyEntries();
 				for (int pos = dirty.nextSetBit(0); pos >= 0;
 						pos = dirty.nextSetBit(pos + 1)) {
 					paths.add(currentIndex.getEntry(pos).getPathString());
 				}
 			}
+
 			if (!paths.isEmpty())
 				refreshFiles(paths);
 
@@ -624,6 +654,7 @@ public class IndexDiffCacheEntry {
 				return null; // workspace is closed
 			IndexDiff diffForChangedResources = new IndexDiff(repository,
 					Constants.HEAD, iterator);
+			diffForChangedResources.setReportIgnored(reportIgnored);
 			if (FsMonitor.isEnabled(repository)) {
 				diffForChangedResources.setForceContentCheckPaths(treeFilterPaths);
 			}
@@ -769,6 +800,7 @@ public class IndexDiffCacheEntry {
 				return null; // workspace is closed
 			IndexDiff newDiff = new IndexDiff(repository, Constants.HEAD,
 					iterator);
+			newDiff.setReportIgnored(reportIgnored);
 			newDiff.setForceContentCheckPaths(checkPaths);
 			if (untrackedOnly) {
 				newDiff.setFilter(new org.eclipse.jgit.treewalk.filter.TreeFilter() {

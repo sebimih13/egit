@@ -38,6 +38,57 @@ import org.junit.Test;
  */
 public class UntrackedCacheIndexDiffCacheTest extends GitTestCase {
 	@Test
+	public void nativeAllCacheSupportsRetainedNonIgnoredStatus() throws Exception {
+		assumeFalse(SystemReader.getInstance().isWindows());
+		Path directory = Files.createTempDirectory("egit-native-untracked-");
+		TestRepository fixture = new TestRepository(directory.resolve(".git").toFile());
+		IndexDiffCacheEntry entry = null;
+		try {
+			Repository repository = fixture.getRepository();
+			Files.createDirectories(directory.resolve("sub"));
+			Files.writeString(directory.resolve("sub/.gitignore"), "*.tmp\n");
+			Files.writeString(directory.resolve("sub/hidden.tmp"), "ignored\n");
+			Path excludes = repository.getDirectory().toPath().resolve("test-excludes");
+			Files.writeString(excludes, "");
+			repository.getConfig().setString("core", null, "excludesFile", excludes.toString());
+			repository.getConfig().save();
+			org.eclipse.jgit.junit.NativeUntrackedCheckoutSupport.prepare(repository, "all", "sub/tracked");
+			byte[] original = Files.readAllBytes(repository.getIndexFile().toPath());
+			entry = new IndexDiffCacheEntry(repository, null, false);
+			waitForJobs();
+			assertNonIgnoredStatus(repository, entry.getIndexDiff());
+			Files.writeString(directory.resolve("sub/.gitignore"), "\n");
+			entry.refresh();
+			waitForJobs();
+			assertNonIgnoredStatus(repository, entry.getIndexDiff());
+			assertTrue(entry.getIndexDiff().getUntracked().contains("sub/hidden.tmp"));
+			Files.writeString(directory.resolve("sub/added"), "new\n");
+			entry.refreshFiles(Set.of("sub/added"));
+			waitForJobs();
+			assertNonIgnoredStatus(repository, entry.getIndexDiff());
+			assertArrayEquals(original, Files.readAllBytes(repository.getIndexFile().toPath()));
+		} finally {
+			if (entry != null) entry.dispose();
+			waitForJobs();
+			fixture.dispose();
+			FileUtils.delete(directory.toFile(), FileUtils.RECURSIVE | FileUtils.RETRY);
+		}
+	}
+
+	private void assertNonIgnoredStatus(Repository repository, IndexDiffData actual)
+			throws Exception {
+		Set<String> expected = new java.util.HashSet<>();
+		for (String record : new String(nativeGit(repository, "--no-optional-locks",
+				"status", "--porcelain=v1", "-z", "--untracked-files=all", "--no-renames"),
+				StandardCharsets.UTF_8).split("\0")) {
+			if (record.startsWith("?? ")) expected.add(record.substring(3));
+			else if (!record.isEmpty()) throw new AssertionError(record);
+		}
+		assertEquals(expected, actual.getUntracked());
+		assertTrue(actual.getIgnoredNotInIndex().isEmpty());
+	}
+
+	@Test
 	public void nativeDirectoryListingReusePreservesIgnoredRefreshResults()
 			throws Exception {
 		assumeFalse(SystemReader.getInstance().isWindows());
