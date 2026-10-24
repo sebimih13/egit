@@ -38,6 +38,97 @@ import org.junit.Test;
  */
 public class UntrackedCacheIndexDiffCacheTest extends GitTestCase {
 	@Test
+	public void ignoredUntrackOperationRetainsOnlyStagedDeletion() throws Exception {
+		assumeFalse(SystemReader.getInstance().isWindows());
+		Path directory = Files.createTempDirectory("egit-ignored-untrack-");
+		TestRepository fixture = new TestRepository(directory.resolve(".git").toFile());
+		IndexDiffCacheEntry entry = null;
+		try {
+			Repository repository = fixture.getRepository();
+			org.eclipse.jgit.junit.NativeUntrackedCheckoutSupport.prepare(repository, "all", "sub/tracked");
+			Files.writeString(directory.resolve("sub/.gitignore"), "tracked\n");
+			entry = new IndexDiffCacheEntry(repository, null, false);
+			waitForJobs();
+			new org.eclipse.egit.core.op.UntrackOperation(repository,
+					List.of(new org.eclipse.core.runtime.Path(
+							directory.resolve("sub/tracked").toString()))).execute(null);
+			assertTrue(repository.readDirCache().getEntry("sub/tracked") == null);
+			waitForJobs();
+			entry.refresh();
+			waitForJobs();
+			IndexDiffData data = entry.getIndexDiff();
+			assertEquals(Set.of("sub/tracked"), data.getRemoved());
+			assertTrue(!data.getUntracked().contains("sub/tracked"));
+			assertTrue(data.getAdded().isEmpty());
+			assertTrue(data.getChanged().isEmpty());
+			assertTrue(data.getModified().isEmpty());
+			assertTrue(data.getMissing().isEmpty());
+			assertTrue(data.getConflicting().isEmpty());
+			String nativeStatus = new String(nativeGit(repository, "--no-optional-locks",
+					"status", "--porcelain=v1", "-z", "--untracked-files=all", "--no-renames"),
+					StandardCharsets.UTF_8);
+			assertTrue(nativeStatus.contains("D  sub/tracked\0"));
+			assertTrue(!nativeStatus.contains("?? sub/tracked\0"));
+		} finally {
+			if (entry != null) entry.dispose();
+			waitForJobs();
+			fixture.dispose();
+			FileUtils.delete(directory.toFile(), FileUtils.RECURSIVE | FileUtils.RETRY);
+		}
+	}
+
+	@Test
+	public void completeRefreshPublishesJavaUntrackedCache() throws Exception {
+		assumeFalse(SystemReader.getInstance().isWindows());
+		Path directory = Files.createTempDirectory("egit-java-untracked-");
+		TestRepository fixture = new TestRepository(directory.resolve(".git").toFile());
+		IndexDiffCacheEntry entry = null;
+		try {
+			Repository repository = fixture.getRepository();
+			var config = repository.getConfig();
+			config.setBoolean("core", null, "untrackedCache", true);
+			config.setBoolean("core", null, "fsmonitor", false);
+			config.setString("status", null, "showUntrackedFiles", "all");
+			Path excludes = repository.getDirectory().toPath().resolve("test-excludes");
+			Files.writeString(excludes, "");
+			config.setString("core", null, "excludesFile", excludes.toString());
+			config.save();
+			Files.createDirectories(directory.resolve("sub"));
+			Files.writeString(directory.resolve("sub/tracked"), "base\n");
+			try (Git git = Git.wrap(repository)) {
+				git.add().addFilepattern("sub/tracked").call();
+				git.commit().setMessage("base").call();
+			}
+			Files.writeString(directory.resolve("sub/loose"), "new\n");
+			Files.writeString(directory.resolve("sub/.gitignore"), "*.tmp\n");
+			Files.writeString(directory.resolve("sub/hidden.tmp"), "ignored\n");
+			for (Path path : List.of(directory, directory.resolve("sub"))) {
+				Files.setLastModifiedTime(path, java.nio.file.attribute.FileTime
+						.fromMillis(System.currentTimeMillis() - 60000));
+			}
+			assertTrue(repository.readDirCache().getUntrackedCache().root == null);
+			entry = new IndexDiffCacheEntry(repository, null, false, true);
+			waitForJobs();
+			assertNonIgnoredStatus(repository, entry.getIndexDiff());
+			assertTrue(repository.readDirCache().getUntrackedCache().root.valid);
+			Files.writeString(directory.resolve("sub/new"), "next\n");
+			entry.refresh();
+			waitForJobs();
+			assertNonIgnoredStatus(repository, entry.getIndexDiff());
+			assertTrue(entry.getIndexDiff().getUntracked().contains("sub/new"));
+			byte[] published = Files.readAllBytes(repository.getIndexFile().toPath());
+			nativeGit(repository, "--no-optional-locks", "status", "--porcelain=v1",
+					"-z", "--untracked-files=all", "--no-renames");
+			assertArrayEquals(published, Files.readAllBytes(repository.getIndexFile().toPath()));
+		} finally {
+			if (entry != null) entry.dispose();
+			waitForJobs();
+			fixture.dispose();
+			FileUtils.delete(directory.toFile(), FileUtils.RECURSIVE | FileUtils.RETRY);
+		}
+	}
+
+	@Test
 	public void nativeAllCacheSupportsRetainedNonIgnoredStatus() throws Exception {
 		assumeFalse(SystemReader.getInstance().isWindows());
 		Path directory = Files.createTempDirectory("egit-native-untracked-");
@@ -86,6 +177,12 @@ public class UntrackedCacheIndexDiffCacheTest extends GitTestCase {
 		}
 		assertEquals(expected, actual.getUntracked());
 		assertTrue(actual.getIgnoredNotInIndex().isEmpty());
+		assertTrue(actual.getAdded().isEmpty());
+		assertTrue(actual.getChanged().isEmpty());
+		assertTrue(actual.getRemoved().isEmpty());
+		assertTrue(actual.getModified().isEmpty());
+		assertTrue(actual.getMissing().isEmpty());
+		assertTrue(actual.getConflicting().isEmpty());
 	}
 
 	@Test

@@ -25,6 +25,68 @@ import org.junit.Test;
 
 public class PreloadIndexDiffCacheTest extends GitTestCase {
 	@Test
+	public void defaultPreloadAndFilteredRefreshMatchNativeDiff() throws Exception {
+		TestRepository fixture = new TestRepository(gitDir);
+		Repository repository = fixture.getRepository();
+		IndexDiffCacheEntry entry = null;
+		try (Git git = Git.wrap(repository)) {
+			Path directory = repository.getWorkTree().toPath().resolve("tracked");
+			Files.createDirectories(directory);
+			for (int i = 0; i < 1000; i++)
+				Files.writeString(directory.resolve("f" + i), "base\n");
+			git.add().addFilepattern(".").call();
+			git.commit().setAuthor("Preload Test", "preload@example.invalid")
+					.setCommitter("Preload Test", "preload@example.invalid")
+					.setMessage("base").call();
+			repository.getConfig().unset("core", null, "preloadIndex");
+			byte[] original = Files.readAllBytes(repository.getIndexFile().toPath());
+			entry = new IndexDiffCacheEntry(repository, null);
+			TestUtils.waitForJobs(10000, JobFamilies.INDEX_DIFF_CACHE_UPDATE);
+			org.junit.Assert.assertArrayEquals("Initial EGit scan", original,
+					Files.readAllBytes(repository.getIndexFile().toPath()));
+			Files.writeString(directory.resolve("f0"), "first edit\n");
+			entry.refreshFiles(java.util.Set.of("tracked/f0"));
+			TestUtils.waitForJobs(10000, JobFamilies.INDEX_DIFF_CACHE_UPDATE);
+			assertEquals(java.util.Set.of("tracked/f0"), entry.getIndexDiff().getModified());
+			org.junit.Assert.assertArrayEquals("First incremental EGit scan", original,
+					Files.readAllBytes(repository.getIndexFile().toPath()));
+			org.eclipse.jgit.junit.NativeFsMonitorWorkloadSupport.assertNativeDiff(repository,
+					false, "tracked", java.util.Set.of("tracked/f0"));
+			org.junit.Assert.assertArrayEquals("First native diff", original,
+					Files.readAllBytes(repository.getIndexFile().toPath()));
+			Files.writeString(directory.resolve("f998"), "second edit\n");
+			Files.writeString(directory.resolve("f999"), "third edit\n");
+			entry.refreshFiles(java.util.Set.of("tracked/f998", "tracked/f999"));
+			TestUtils.waitForJobs(10000, JobFamilies.INDEX_DIFF_CACHE_UPDATE);
+			var expected = java.util.Set.of("tracked/f0", "tracked/f998", "tracked/f999");
+			assertEquals(expected, entry.getIndexDiff().getModified());
+			org.eclipse.jgit.junit.NativeFsMonitorWorkloadSupport.assertNativeDiff(repository,
+					false, "tracked", expected);
+			Files.writeString(directory.resolve("f0"), "base\n");
+			entry.refreshFiles(java.util.Set.of("tracked/f0"));
+			TestUtils.waitForJobs(10000, JobFamilies.INDEX_DIFF_CACHE_UPDATE);
+			assertEquals(java.util.Set.of("tracked/f998", "tracked/f999"),
+					entry.getIndexDiff().getModified());
+			org.eclipse.jgit.junit.NativeFsMonitorWorkloadSupport.assertNativeDiff(repository,
+					false, "tracked", java.util.Set.of("tracked/f998", "tracked/f999"));
+			var result = entry.getIndexDiff();
+			assertTrue(result.getAdded().isEmpty());
+			assertTrue(result.getChanged().isEmpty());
+			assertTrue(result.getRemoved().isEmpty());
+			assertTrue(result.getMissing().isEmpty());
+			assertTrue(result.getUntracked().isEmpty());
+			assertTrue(result.getConflicting().isEmpty());
+			org.junit.Assert.assertArrayEquals(original, Files.readAllBytes(repository.getIndexFile().toPath()));
+		} finally {
+			if (entry != null) {
+				entry.dispose();
+				TestUtils.waitForJobs(10000, JobFamilies.INDEX_DIFF_CACHE_UPDATE);
+			}
+			fixture.dispose();
+		}
+	}
+
+	@Test
 	public void fullRefreshUsesPreloadWithoutChangingResults()
 			throws Exception {
 		TestRepository fixture = new TestRepository(gitDir);

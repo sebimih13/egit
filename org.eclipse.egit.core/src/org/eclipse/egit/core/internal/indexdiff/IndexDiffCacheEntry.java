@@ -140,6 +140,8 @@ public class IndexDiffCacheEntry {
 
 	private final boolean reportIgnored;
 
+	private final boolean updateUntrackedCache;
+
 	/**
 	 * @param repository
 	 * @param listener
@@ -159,7 +161,24 @@ public class IndexDiffCacheEntry {
 	 */
 	public IndexDiffCacheEntry(Repository repository,
 			@Nullable IndexDiffChangedListener listener, boolean reportIgnored) {
+		this(repository, listener, reportIgnored, false);
+	}
+
+	/**
+	 * Create a retained cache with optional native untracked-cache publication.
+	 * Publication requires complete scans without ignored reporting; unsupported
+	 * configurations retain the ordinary read-only scan behavior.
+	 *
+	 * @param repository repository to observe
+	 * @param listener optional result listener
+	 * @param reportIgnored whether ignored paths are required
+	 * @param updateUntrackedCache whether to attempt optional cache publication
+	 */
+	public IndexDiffCacheEntry(Repository repository,
+			@Nullable IndexDiffChangedListener listener, boolean reportIgnored,
+			boolean updateUntrackedCache) {
 		this.reportIgnored = reportIgnored;
+		this.updateUntrackedCache = updateUntrackedCache;
 		this.repositoryGitDir = repository.getDirectory();
 		this.repositoryName = RepositoryUtil.INSTANCE
 				.getRepositoryName(repository);
@@ -795,7 +814,8 @@ public class IndexDiffCacheEntry {
 
 		return UnitOfWork.run(repository, () -> {
 			WorkingTreeIterator iterator = IteratorService
-					.createInitialIterator(repository);
+					.createInitialIterator(repository,
+							updateUntrackedCache && !reportIgnored && !untrackedOnly);
 			if (iterator == null)
 				return null; // workspace is closed
 			IndexDiff newDiff = new IndexDiff(repository, Constants.HEAD,
@@ -818,6 +838,9 @@ public class IndexDiffCacheEntry {
 
 			newDiff.diff(jgitMonitor, 0, 0, jobName,
 					() -> RepositoryCache.INSTANCE.getBuilder(true, true));
+			if (updateUntrackedCache && !monitor.isCanceled()) {
+				newDiff.updateUntrackedCache();
+			}
 			return new IndexDiffData(newDiff);
 		});
 	}

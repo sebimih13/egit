@@ -37,10 +37,22 @@ public class IteratorService {
 	 */
 	public static WorkingTreeIterator createInitialIterator(
 			Repository repository) {
+		return createInitialIterator(repository, false);
+	}
+
+	/**
+	 * Create an iterator that can record a complete untracked-cache scan.
+	 *
+	 * @param repository repository to walk
+	 * @param recordUntrackedCache whether to capture optional cache data
+	 * @return an iterator, or {@code null} for a bare repository
+	 */
+	public static WorkingTreeIterator createInitialIterator(
+			Repository repository, boolean recordUntrackedCache) {
 		if (repository.isBare()) {
 			return null;
 		}
-		return new FileTreeIterator(repository);
+		return new FileTreeIterator(repository, recordUntrackedCache);
 	}
 
 	/**

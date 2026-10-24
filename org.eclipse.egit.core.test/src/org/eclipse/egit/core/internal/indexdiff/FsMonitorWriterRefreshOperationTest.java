@@ -60,6 +60,53 @@ public class FsMonitorWriterRefreshOperationTest extends GitTestCase {
 		checkOperations("stale");
 	}
 
+	@Test
+	public void monitoredCachePublicationCannotLoseLateUntrackedNotifications() throws Exception {
+		TestRepository fixture = new TestRepository(new java.io.File(
+				project.getProject().getLocation().toFile(), ".git"));
+		IndexDiffCacheEntry cache = null;
+		try {
+			fixture.connect(project.getProject());
+			var repository = fixture.getRepository();
+			NativeFsMonitorIndexSupport.prepare(repository);
+			repository.getConfig().setBoolean("core", null, "untrackedCache", true);
+			repository.getConfig().setString("status", null, "showUntrackedFiles", "all");
+			repository.getConfig().save();
+			var index = repository.lockDirCache();
+			try {
+				index.write();
+				assertTrue(index.commit());
+			} finally {
+				index.unlock();
+			}
+			cache = new IndexDiffCacheEntry(repository, null, false, true);
+			waitForJobs();
+			assertTrue(repository.readDirCache().getUntrackedCache().root.valid);
+			Path stamp = repository.getDirectory().toPath().resolve("publication-stamp");
+			Files.writeString(stamp, "");
+			Files.setLastModifiedTime(stamp,
+					Files.getLastModifiedTime(repository.getWorkTree().toPath().resolve("a")));
+			Path hook = Path.of(repository.getConfig().getString("core", null, "fsmonitor"));
+			Files.writeString(hook, "#!/bin/sh\n"
+					+ "if test -e .git/index.lock && ! test -e .git/publication-done; then\n"
+					+ "  printf 'next\\n' > a\n  touch -r .git/publication-stamp a\n"
+					+ "  printf 'late\\n' > late\n  touch .git/publication-done\n"
+					+ "  printf 'writer-clock\\000a\\000late\\000'\n"
+					+ "else\n  cat .git/fsmonitor-index.response\nfi\n");
+			NativeFsMonitorIndexSupport.reportToken(repository, "after-clock");
+			cache.refresh();
+			waitForJobs();
+			assertTrue(Files.exists(repository.getDirectory().toPath().resolve("publication-done")));
+			assertTrue(cache.getIndexDiff().getUntracked().contains("late"));
+			assertEquals(Set.of("a"), cache.getIndexDiff().getModified());
+			compareStatus(repository, cache.getIndexDiff());
+		} finally {
+			if (cache != null) cache.dispose();
+			waitForJobs();
+			fixture.dispose();
+		}
+	}
+
 	private void checkOperations(String mode) throws Exception {
 		TestRepository fixture = new TestRepository(new java.io.File(
 				project.getProject().getLocation().toFile(), ".git"));
