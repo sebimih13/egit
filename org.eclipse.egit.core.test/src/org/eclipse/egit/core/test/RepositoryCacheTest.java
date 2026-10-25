@@ -52,6 +52,21 @@ public class RepositoryCacheTest extends GitTestCase {
 	}
 
 	@Test
+	public void disposingFixtureKeepsCachedRepositoryNotifications() {
+		var events = new java.util.ArrayList<org.eclipse.jgit.events.IndexChangedEvent>();
+		var listener = repository.getListenerList()
+				.addIndexChangedListener(events::add);
+		try {
+			testRepository.dispose();
+			repository.notifyIndexChanged(true);
+			assertEquals(1, events.size());
+			assertEquals(repository, events.get(0).getRepository());
+		} finally {
+			listener.remove();
+		}
+	}
+
+	@Test
 	public void indexNotificationsRetainScopeAcrossRepositoryForwarding()
 			throws Exception {
 		Repository cached = RepositoryCache.INSTANCE.lookupRepository(

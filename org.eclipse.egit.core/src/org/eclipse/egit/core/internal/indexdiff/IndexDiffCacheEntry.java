@@ -369,7 +369,7 @@ public class IndexDiffCacheEntry {
 
 			lastIndex = currentIndex;
 
-			if (FsMonitor.isHookConfigured(repository) && (monitorPaths == null
+			if (FsMonitor.isConfigured(repository) && (monitorPaths == null
 					|| !java.util.Arrays.equals(indexChecksum,
 							currentIndex.getReadIndexChecksum()))) {
 				// External or uncorrelated writers cannot supply the consumed
@@ -384,7 +384,7 @@ public class IndexDiffCacheEntry {
 			}
 
 			Set<String> paths = new TreeSet<>();
-			if (FsMonitor.isHookConfigured(repository) && monitorPaths != null) {
+			if (FsMonitor.isConfigured(repository) && monitorPaths != null) {
 				paths.addAll(monitorPaths);
 			}
 			try (TreeWalk walk = new TreeWalk(repository)) {
@@ -400,7 +400,7 @@ public class IndexDiffCacheEntry {
 				}
 			}
 
-			if (FsMonitor.isHookConfigured(repository)
+			if (FsMonitor.isConfigured(repository)
 					&& currentIndex.getFsMonitorCache() != null) {
 				var dirty = currentIndex.getFsMonitorCache().getDirtyEntries();
 				for (int pos = dirty.nextSetBit(0); pos >= 0;

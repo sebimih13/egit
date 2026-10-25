@@ -20,11 +20,12 @@ import org.junit.runners.Suite;
  * support for every native index extension or daemon protocol.
  */
 @RunWith(Suite.class)
-@Suite.SuiteClasses({ NativeCacheIndexDiffTest.class,
-		FsMonitorIndexDiffCacheTest.class, FsMonitorIndexStorageTest.class,
+@Suite.SuiteClasses({ NativeCacheIndexDiffTest.class, IndexDiffDataTest.class,
+		FsMonitorIndexDiffCacheTest.class, FsMonitorDaemonOperationTest.class,
+		FsMonitorIndexStorageTest.class,
 		FsMonitorIndexQueryOperationTest.class,
 		FsMonitorInitializationOperationTest.class,
-		FsMonitorWriterRefreshOperationTest.class,
+		FsMonitorWriterRefreshOperationTest.class, FsMonitorCheckoutOperationTest.class,
 		UntrackedCacheIndexDiffCacheTest.class,
 		PreloadIndexDiffCacheTest.class, IndexSkipHashOperationTest.class,
 		NativeIndexVersionOperationTest.class })

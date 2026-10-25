@@ -29,6 +29,85 @@ import org.junit.Test;
 
 public class FsMonitorIndexQueryOperationTest extends GitTestCase {
 	@Test
+	public void filteredRefreshesRetainReportedSameStatChanges() throws Exception {
+		checkFilteredRefresh("paths");
+	}
+
+	@Test
+	public void rootInvalidationPreservesFilteredRefreshChecks() throws Exception {
+		checkFilteredRefresh("root");
+	}
+
+	@Test
+	public void failedProviderPreservesFilteredRefreshChecks() throws Exception {
+		checkFilteredRefresh("failure");
+	}
+
+	private void checkFilteredRefresh(String mode) throws Exception {
+		TestRepository fixture = new TestRepository(new java.io.File(
+				project.getProject().getLocation().toFile(), ".git"));
+		IndexDiffCacheEntry entry = null;
+		try {
+			fixture.connect(project.getProject());
+			var repo = fixture.getRepository();
+			NativeFsMonitorIndexSupport.prepare(repo);
+			var root = repo.getWorkTree().toPath();
+			for (String path : List.of("sub/leaf", "sub-neighbor/file")) {
+				Files.createDirectories(root.resolve(path).getParent());
+				Files.writeString(root.resolve(path), "base\n");
+			}
+			try (var git = Git.wrap(repo)) {
+				git.add().addFilepattern("sub").addFilepattern("sub-neighbor").call();
+				git.commit().setAuthor("Filter Test", "filter@example.invalid")
+						.setCommitter("Filter Test", "filter@example.invalid")
+						.setMessage("directories").call();
+			}
+			NativeFsMonitorIndexSupport.report(repo);
+			var valid = NativeFsMonitorIndexSupport.mutate(repo, "update-index",
+					"--fsmonitor-valid", "a", "m", "z", "sub/leaf", "sub-neighbor/file");
+			Files.copy(valid.index(), repo.getIndexFile().toPath(),
+					StandardCopyOption.REPLACE_EXISTING);
+			byte[] original = Files.readAllBytes(repo.getIndexFile().toPath());
+			entry = new IndexDiffCacheEntry(repo, null);
+			waitForJobs();
+			java.util.concurrent.TimeUnit.MILLISECONDS.sleep(1010 - System.currentTimeMillis() % 1000);
+			for (String path : List.of("sub/leaf", "sub-neighbor/file")) {
+				var time = Files.getLastModifiedTime(root.resolve(path));
+				Files.writeString(root.resolve(path), "edit\n");
+				Files.setLastModifiedTime(root.resolve(path), time);
+			}
+			NativeFsMonitorIndexSupport.report(repo, mode.equals("root") ? new String[] { "/" }
+					: new String[] { "sub/leaf", "sub-neighbor/file" });
+			if (mode.equals("failure")) {
+				Files.writeString(Path.of(repo.getConfig().getString("core", null, "fsmonitor")),
+						"#!/bin/sh\nexit 1\n");
+			}
+			org.eclipse.jgit.junit.NativeFsMonitorWorkloadSupport.assertNativeDiff(
+					repo, false, "sub", Set.of("sub/leaf"));
+			for (boolean preload : new boolean[] { false, true }) {
+				Files.writeString(root.resolve("sub/leaf"), "edit\n");
+				repo.getConfig().setBoolean("core", null, "preloadIndex", preload);
+				entry.refreshFiles(Set.of("sub/"));
+				waitForJobs();
+				assertTrue(entry.getIndexDiff().getModified().contains("sub/leaf"));
+				entry.refreshFiles(Set.of("sub-neighbor/file"));
+				waitForJobs();
+				assertEquals(Set.of("sub/leaf", "sub-neighbor/file"),
+						entry.getIndexDiff().getModified());
+				Files.writeString(root.resolve("sub/leaf"), "base\n");
+				entry.refreshFiles(Set.of("sub/"));
+				waitForJobs();
+				assertEquals(Set.of("sub-neighbor/file"), entry.getIndexDiff().getModified());
+				assertArrayEquals(original, Files.readAllBytes(repo.getIndexFile().toPath()));
+			}
+		} finally {
+			if (entry != null) entry.dispose();
+			waitForJobs();
+			fixture.dispose();
+		}
+	}
+
+	@Test
 	public void storedDirtyAndReportedPathsSurviveRepeatedRefreshJobs()
 			throws Exception {
 		checkRefresh(false);

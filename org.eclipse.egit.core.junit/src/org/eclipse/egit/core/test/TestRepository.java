@@ -86,6 +86,8 @@ public class TestRepository {
 		tmpRepository.close();
 		// use repository instance from RepositoryCache!
 		repository = RepositoryCache.INSTANCE.lookupRepository(gitDir);
+		// Retain a fixture-owned reference; the cache owns the initial one.
+		repository.incrementOpen();
 		workdirPrefix = repository.getWorkTree().getAbsolutePath();
 		workdirPrefix = workdirPrefix.replace('\\', '/');
 		if (!workdirPrefix.endsWith("/")) //$NON-NLS-1$

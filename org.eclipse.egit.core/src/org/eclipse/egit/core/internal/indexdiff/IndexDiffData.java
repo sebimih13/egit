@@ -206,6 +206,13 @@ public class IndexDiffData {
 	private void mergeList(Set<String> baseList,
 			Collection<String> changedFiles, Set<String> listForChangedFiles) {
 		for (String file : changedFiles) {
+			if (file.endsWith("/")) { //$NON-NLS-1$
+				baseList.removeIf(path -> inRefreshedFolder(path, file));
+				for (String path : listForChangedFiles) {
+					if (inRefreshedFolder(path, file)) baseList.add(path);
+				}
+				continue;
+			}
 			if (baseList.contains(file)) {
 				if (!listForChangedFiles.contains(file))
 					baseList.remove(file);
@@ -221,6 +228,18 @@ public class IndexDiffData {
 			Map<String, StageState> baseStates,
 			Map<String, StageState> newConflictStates) {
 		for (String file : changedFiles) {
+			if (file.endsWith("/")) { //$NON-NLS-1$
+				baseList.removeIf(path -> inRefreshedFolder(path, file));
+				baseStates.keySet().removeIf(path -> inRefreshedFolder(path, file));
+				for (String path : listForChangedFiles) {
+					if (inRefreshedFolder(path, file)) {
+						baseList.add(path);
+						StageState state = newConflictStates.get(path);
+						if (state != null) baseStates.put(path, state);
+					}
+				}
+				continue;
+			}
 			if (baseList.contains(file)) {
 				if (!listForChangedFiles.contains(file)) {
 					baseList.remove(file);
@@ -243,6 +262,11 @@ public class IndexDiffData {
 		}
 	}
 
+	private static boolean inRefreshedFolder(String path, String folder) {
+		return folder.equals("/") || path.startsWith(folder) //$NON-NLS-1$
+				|| path.equals(folder.substring(0, folder.length() - 1));
+	}
+
 	private static Set<String> mergeUntrackedFolders(Set<String> oldUntrackedFolders,
 			Collection<String> changedFiles, Set<String> newUntrackedFolders) {
 		Set<String> merged = new HashSet<>();
@@ -259,7 +283,8 @@ public class IndexDiffData {
 	private static boolean isAnyFileContainedInFolder(String folder,
 			Collection<String> files) {
 		for (String file : files)
-			if (file.startsWith(folder))
+			if (file.startsWith(folder) || file.endsWith("/") //$NON-NLS-1$
+					&& inRefreshedFolder(folder, file))
 				return true;
 		return false;
 	}
