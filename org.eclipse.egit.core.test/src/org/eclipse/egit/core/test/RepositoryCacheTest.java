@@ -79,22 +79,25 @@ public class RepositoryCacheTest extends GitTestCase {
 		try {
 			var paths = java.util.Set.of("outside", "dir/new");
 			byte[] checksum = new byte[] { 1, 2, 3 };
+			Object operationToken = new Object();
 			try (Repository separate = new org.eclipse.jgit.storage.file.FileRepositoryBuilder()
 					.setGitDir(repository.getDirectory()).build()) {
-				separate.fireEvent(new org.eclipse.jgit.events.IndexChangedEvent(true, paths, checksum));
+				separate.fireEvent(new org.eclipse.jgit.events.IndexChangedEvent(true, paths, checksum, operationToken));
 			}
 			assertEquals(1, globalEvents.size());
 			assertEquals(paths, globalEvents.get(0).getFsMonitorPaths());
 			org.junit.Assert.assertArrayEquals(checksum,
 					globalEvents.get(0).getIndexChecksum());
 			assertEquals(cached, globalEvents.get(0).getRepository());
+			org.junit.Assert.assertSame(operationToken, globalEvents.get(0).getOperationToken());
 			// Exercise the handle's delegate-to-handle forwarding separately.
-			cached.notifyIndexChanged(new org.eclipse.jgit.events.IndexChangedEvent(true, paths, checksum));
+			cached.notifyIndexChanged(new org.eclipse.jgit.events.IndexChangedEvent(true, paths, checksum, operationToken));
 			assertEquals(1, handleEvents.size());
 			assertEquals(paths, handleEvents.get(0).getFsMonitorPaths());
 			org.junit.Assert.assertArrayEquals(checksum,
 					handleEvents.get(0).getIndexChecksum());
 			assertEquals(cached, handleEvents.get(0).getRepository());
+			org.junit.Assert.assertSame(operationToken, handleEvents.get(0).getOperationToken());
 		} finally {
 			local.remove();
 			global.remove();

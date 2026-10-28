@@ -29,6 +29,190 @@ import org.junit.Test;
 
 /** Advance persisted clocks through actual staging and untracking operations. */
 public class FsMonitorWriterRefreshOperationTest extends GitTestCase {
+	@Test
+	public void incrementalRefreshQueriesMonitorWithWholeResultCacheEnabled() throws Exception {
+		TestRepository fixture = new TestRepository(new java.io.File(
+				project.getProject().getLocation().toFile(), ".git"));
+		IndexDiffCacheEntry cache = null;
+		try {
+			fixture.connect(project.getProject());
+			var repository = fixture.getRepository();
+			NativeFsMonitorIndexSupport.prepare(repository);
+			repository.getConfig().setBoolean("jgit", null, "fsmonitorCache", true);
+			repository.getConfig().save();
+			byte[] original = Files.readAllBytes(repository.getIndexFile().toPath());
+			cache = new IndexDiffCacheEntry(repository, null);
+			waitForJobs();
+			assertTrue(cache.getIndexDiff().getModified().isEmpty());
+			Path a = repository.getWorkTree().toPath().resolve("a");
+			var time = Files.getLastModifiedTime(a);
+			Files.writeString(a, "next\n");
+			Files.setLastModifiedTime(a, time);
+			NativeFsMonitorIndexSupport.report(repository, "a");
+			cache.refreshFiles(Set.of("a"));
+			waitForJobs();
+			assertEquals(Set.of("a"), cache.getIndexDiff().getModified());
+			compareStatus(repository, cache.getIndexDiff(), false);
+			assertArrayEquals(original, Files.readAllBytes(repository.getIndexFile().toPath()));
+		} finally {
+			if (cache != null) cache.dispose();
+			waitForJobs();
+			fixture.dispose();
+		}
+	}
+
+	@Test
+	public void firstRefreshWithMissingHookStillChecksContents() throws Exception {
+		checkInitiallyUnavailableHook(true);
+	}
+
+	@Test
+	public void firstRefreshWithNonExecutableHookStillChecksContents() throws Exception {
+		checkInitiallyUnavailableHook(false);
+	}
+
+	private void checkInitiallyUnavailableHook(boolean missing) throws Exception {
+		TestRepository fixture = new TestRepository(new java.io.File(
+				project.getProject().getLocation().toFile(), ".git"));
+		IndexDiffCacheEntry cache = null;
+		try {
+			fixture.connect(project.getProject());
+			var repository = fixture.getRepository();
+			NativeFsMonitorIndexSupport.prepare(repository);
+			repository.getConfig().setBoolean("jgit", null, "fsmonitorCache", true);
+			repository.getConfig().save();
+			Path executable = Path.of(repository.getConfig().getString("core", null, "fsmonitor"));
+			if (missing) Files.delete(executable);
+			else assertTrue(executable.toFile().setExecutable(false, false));
+			Path a = repository.getWorkTree().toPath().resolve("a");
+			var time = Files.getLastModifiedTime(a);
+			Files.writeString(a, "next\n");
+			Files.setLastModifiedTime(a, time);
+			byte[] original = Files.readAllBytes(repository.getIndexFile().toPath());
+			cache = new IndexDiffCacheEntry(repository, null);
+			waitForJobs();
+			assertEquals(Set.of("a"), cache.getIndexDiff().getModified());
+			cache.refresh();
+			waitForJobs();
+			assertEquals(Set.of("a"), cache.getIndexDiff().getModified());
+			compareStatus(repository, cache.getIndexDiff(), false);
+			assertArrayEquals(original, Files.readAllBytes(repository.getIndexFile().toPath()));
+		} finally {
+			if (cache != null) cache.dispose();
+			waitForJobs();
+			fixture.dispose();
+		}
+	}
+
+	@Test
+	public void externalIndexWriteDuringOwnPublicationGetsACompleteFollowup() throws Exception {
+		TestRepository fixture = new TestRepository(new java.io.File(
+				project.getProject().getLocation().toFile(), ".git"));
+		IndexDiffCacheEntry cache = null;
+		try {
+			fixture.connect(project.getProject());
+			var repository = fixture.getRepository();
+			NativeFsMonitorIndexSupport.prepare(repository);
+			repository.getConfig().setBoolean("core", null, "untrackedCache", true);
+			repository.getConfig().setBoolean("jgit", null, "fsmonitorCache", true);
+			repository.getConfig().setString("status", null, "showUntrackedFiles", "all");
+			repository.getConfig().save();
+			String blob = repository.readDirCache().getEntry("a").getObjectId().name();
+			Path external = NativeFsMonitorIndexSupport.mutate(repository, "-c", "core.fsmonitor=false",
+					"update-index", "--add", "--cacheinfo", "100644," + blob + ",ghost").index();
+			var replaced = new java.util.concurrent.atomic.AtomicBoolean();
+			var listener = repository.getListenerList().addIndexChangedListener(event -> {
+				if (replaced.compareAndSet(false, true)) {
+					try {
+						Files.copy(external, repository.getIndexFile().toPath(),
+								java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+					} catch (java.io.IOException e) {
+						throw new java.io.UncheckedIOException(e);
+					}
+				}
+			});
+			try {
+				cache = new IndexDiffCacheEntry(repository, null, false, true);
+				waitForJobs();
+				assertTrue(replaced.get());
+				assertEquals(Set.of("ghost"), cache.getIndexDiff().getAdded());
+				assertEquals(Set.of("ghost"), cache.getIndexDiff().getMissing());
+				compareStatus(repository, cache.getIndexDiff(), false);
+				var complete = cache.getIndexDiff();
+				cache.refresh();
+				waitForJobs();
+				org.junit.Assert.assertSame(complete, cache.getIndexDiff());
+			} finally {
+				listener.remove();
+			}
+		} finally {
+			if (cache != null) cache.dispose();
+			waitForJobs();
+			fixture.dispose();
+		}
+	}
+
+	@Test
+	public void earlierSameStatEditSurvivesLaterFullRefresh() throws Exception {
+		checkRetainedDirtyPaths(true);
+	}
+
+	@Test
+	public void earlierSameStatEditSurvivesWithoutUntrackedCache() throws Exception {
+		checkRetainedDirtyPaths(false);
+	}
+
+	private void checkRetainedDirtyPaths(boolean untrackedCache) throws Exception {
+		TestRepository fixture = new TestRepository(new java.io.File(
+				project.getProject().getLocation().toFile(), ".git"));
+		IndexDiffCacheEntry cache = null;
+		try {
+			fixture.connect(project.getProject());
+			var repository = fixture.getRepository();
+			NativeFsMonitorIndexSupport.prepare(repository);
+			repository.getConfig().setBoolean("jgit", null, "fsmonitorCache", true);
+			repository.getConfig().setBoolean("core", null, "untrackedCache", untrackedCache);
+			repository.getConfig().save();
+			byte[] original = Files.readAllBytes(repository.getIndexFile().toPath());
+			java.util.concurrent.TimeUnit.MILLISECONDS.sleep(1010 - System.currentTimeMillis() % 1000);
+			Path a = repository.getWorkTree().toPath().resolve("a");
+			var time = Files.getLastModifiedTime(a);
+			Files.writeString(a, "next\n");
+			Files.setLastModifiedTime(a, time);
+			NativeFsMonitorIndexSupport.reportToken(repository, "first-clock", "a");
+			cache = new IndexDiffCacheEntry(repository, null);
+			waitForJobs();
+			assertEquals(Set.of("a"), cache.getIndexDiff().getModified());
+			compareStatus(repository, cache.getIndexDiff(), false);
+			Path z = repository.getWorkTree().toPath().resolve("z");
+			var zTime = Files.getLastModifiedTime(z);
+			Files.writeString(z, "next\n");
+			Files.setLastModifiedTime(z, zTime);
+			NativeFsMonitorIndexSupport.reportToken(repository, "second-clock", "z");
+			cache.refresh();
+			waitForJobs();
+			var second = cache.getIndexDiff();
+			assertEquals(Set.of("a", "z"), second.getModified());
+			compareStatus(repository, second, false);
+			NativeFsMonitorIndexSupport.reportToken(repository, "quiet-clock");
+			cache.refresh();
+			waitForJobs();
+			assertEquals(Set.of("a", "z"), cache.getIndexDiff().getModified());
+			if (untrackedCache) org.junit.Assert.assertSame(second, cache.getIndexDiff());
+			Files.writeString(a, "base\n");
+			Files.setLastModifiedTime(a, time);
+			NativeFsMonitorIndexSupport.reportToken(repository, "restored-clock", "a");
+			cache.refresh();
+			waitForJobs();
+			assertEquals(Set.of("z"), cache.getIndexDiff().getModified());
+			compareStatus(repository, cache.getIndexDiff(), false);
+			assertArrayEquals(original, Files.readAllBytes(repository.getIndexFile().toPath()));
+		} finally {
+			if (cache != null) cache.dispose();
+			waitForJobs();
+			fixture.dispose();
+		}
+	}
 
 	@Test
 	public void stagingAndUntrackingRetainEarlierReportedChanges() throws Exception {
@@ -62,6 +246,15 @@ public class FsMonitorWriterRefreshOperationTest extends GitTestCase {
 
 	@Test
 	public void monitoredCachePublicationCannotLoseLateUntrackedNotifications() throws Exception {
+		checkLatePublication(false);
+	}
+
+	@Test
+	public void resultCachePublicationCannotLoseLateUntrackedNotifications() throws Exception {
+		checkLatePublication(true);
+	}
+
+	private void checkLatePublication(boolean resultCache) throws Exception {
 		TestRepository fixture = new TestRepository(new java.io.File(
 				project.getProject().getLocation().toFile(), ".git"));
 		IndexDiffCacheEntry cache = null;
@@ -71,6 +264,7 @@ public class FsMonitorWriterRefreshOperationTest extends GitTestCase {
 			NativeFsMonitorIndexSupport.prepare(repository);
 			repository.getConfig().setBoolean("core", null, "untrackedCache", true);
 			repository.getConfig().setString("status", null, "showUntrackedFiles", "all");
+			repository.getConfig().setBoolean("jgit", null, "fsmonitorCache", resultCache);
 			repository.getConfig().save();
 			var index = repository.lockDirCache();
 			try {
@@ -241,16 +435,22 @@ public class FsMonitorWriterRefreshOperationTest extends GitTestCase {
 
 	private static void compareStatus(org.eclipse.jgit.lib.Repository repository,
 			IndexDiffData actual) throws Exception {
+		compareStatus(repository, actual, true);
+	}
+
+	private static void compareStatus(org.eclipse.jgit.lib.Repository repository,
+			IndexDiffData actual, boolean monitored) throws Exception {
 		Set<String> added = new HashSet<>(), changed = new HashSet<>(),
 				removed = new HashSet<>(), modified = new HashSet<>(),
 				missing = new HashSet<>(), untracked = new HashSet<>(),
 				ignored = new HashSet<>();
 		for (String record : new String(NativeFsMonitorIndexSupport.status(
-				repository, true), StandardCharsets.UTF_8).split("\0")) {
+				repository, monitored), StandardCharsets.UTF_8).split("\0")) {
 			if (record.isEmpty()) continue;
 			String path = record.substring(3);
 			switch (record.substring(0, 2)) {
 			case "A ": added.add(path); break;
+			case "AD": added.add(path); missing.add(path); break;
 			case "M ": changed.add(path); break;
 			case "D ": removed.add(path); break;
 			case " M": modified.add(path); break;

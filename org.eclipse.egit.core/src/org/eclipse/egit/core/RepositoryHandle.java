@@ -106,7 +106,8 @@ class RepositoryHandle extends Repository {
 			Repository repo = ref.get();
 			if (repo != null) {
 				fireEvent(repo, new IndexChangedEvent(event.isInternal(),
-						event.getFsMonitorPaths(), event.getIndexChecksum()));
+						event.getFsMonitorPaths(), event.getIndexChecksum(),
+						event.getOperationToken()));
 			}
 		}));
 		listeners.add(list.addRefsChangedListener(event -> {

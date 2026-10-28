@@ -10,6 +10,7 @@ package org.eclipse.egit.core.internal.indexdiff;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertTrue;
 
@@ -47,7 +48,45 @@ public class FsMonitorDaemonOperationTest extends GitTestCase {
 		check(true);
 	}
 
+	@Test
+	public void nativeHistoryResetCanPublishItsFirstCompleteScan() throws Exception {
+		check(true, true);
+	}
+
 	private void check(boolean publish) throws Exception {
+		check(publish, false);
+	}
+
+	@Test
+	public void firstNativeDaemonScanPublishesWithoutAnExistingFSMNRecord() throws Exception {
+		check(true, false, true);
+	}
+
+	private void check(boolean publish, boolean resetHistory) throws Exception {
+		check(publish, resetHistory, false);
+	}
+
+	private void check(boolean publish, boolean resetHistory, boolean withoutSavedMonitor) throws Exception {
+		check(publish, resetHistory, withoutSavedMonitor, !publish);
+	}
+
+	@Test
+	public void resultCacheAndPublicationShareTheNativeDaemonScanBoundary() throws Exception {
+		check(true, false, false, true);
+	}
+
+	@Test
+	public void resultCachePublicationSurvivesNativeHistoryReset() throws Exception {
+		check(true, true, false, true);
+	}
+
+	@Test
+	public void resultCachePublicationWorksWithoutSavedMonitorState() throws Exception {
+		check(true, false, true, true);
+	}
+
+	private void check(boolean publish, boolean resetHistory, boolean withoutSavedMonitor,
+			boolean resultCache) throws Exception {
 		TestRepository fixture = new TestRepository(new java.io.File(
 				project.getProject().getLocation().toFile(), ".git"));
 		IndexDiffCacheEntry cache = null;
@@ -64,26 +103,52 @@ public class FsMonitorDaemonOperationTest extends GitTestCase {
 			repository.getConfig().setBoolean("core", null, "untrackedCache",
 					true);
 			repository.getConfig().setBoolean("jgit", null, "fsmonitorCache",
-					!publish);
+					resultCache);
 			repository.getConfig().setString("status", null,
 					"showUntrackedFiles", "all");
 			try (var daemon = NativeFsMonitorDaemonSupport.start(repository)) {
-				var nativeIndex = NativeFsMonitorIndexSupport.mutate(repository,
-						"update-index", "--fsmonitor", "--fsmonitor-valid", "a",
-						"m", "z", ".project", "--force-write-index");
+				var nativeIndex = withoutSavedMonitor
+						? NativeFsMonitorIndexSupport.mutate(repository, "-c", "core.fsmonitor=false",
+								"update-index", "--no-fsmonitor", "--force-write-index")
+						: NativeFsMonitorIndexSupport.mutate(repository,
+								"update-index", "--fsmonitor", "--fsmonitor-valid", "a",
+								"m", "z", ".project", "--force-write-index");
 				Files.copy(nativeIndex.index(),
 						repository.getIndexFile().toPath(),
 						StandardCopyOption.REPLACE_EXISTING);
-				cache = new IndexDiffCacheEntry(repository, null, false,
-						publish);
-				waitForJobs();
+				if (withoutSavedMonitor) {
+					assertNull(repository.readDirCache().getFsMonitorCache());
+				}
+				if (resetHistory) {
+					daemon.flush();
+				}
+				var publications = new java.util.concurrent.CopyOnWriteArrayList<Boolean>();
+				var listener = repository.getListenerList().addIndexChangedListener(event -> {
+					try {
+						var untracked = repository.readDirCache().getUntrackedCache();
+						publications.add(untracked != null && untracked.root != null && untracked.root.valid);
+					} catch (java.io.IOException error) {
+						throw new java.io.UncheckedIOException(error);
+					}
+				});
+				try {
+					cache = new IndexDiffCacheEntry(repository, null, false,
+							publish);
+					waitForJobs();
+					if (resetHistory || withoutSavedMonitor) {
+						assertFalse(publications.isEmpty());
+						assertEquals(Boolean.TRUE, publications.get(0));
+					}
+				} finally {
+					listener.remove();
+				}
 				var first = cache.getIndexDiff();
 				assertNotNull(first);
 				assertTrue(first.getModified().isEmpty());
 				assertTrue(first.getUntracked().isEmpty());
 				cache.refresh();
 				waitForJobs();
-				if (!publish)
+				if (resultCache)
 					assertSame(first, cache.getIndexDiff());
 				if (publish) {
 					assertTrue(repository.readDirCache()
@@ -106,10 +171,9 @@ public class FsMonitorDaemonOperationTest extends GitTestCase {
 				assertEquals(Set.of("loose"),
 						cache.getIndexDiff().getUntracked());
 				if (publish) {
-					// The writer queries the persisted pre-scan clock, so the
-					// overlapping notification conservatively invalidates this
-					// directory. A quiescent scan must then converge.
-					assertFalse(repository.readDirCache()
+					// Covered scan notifications must not invalidate the newly
+					// published directory. The writer queries the scan boundary.
+					assertTrue(repository.readDirCache()
 							.getUntrackedCache().root.valid);
 					cache.refresh();
 					waitForJobs();

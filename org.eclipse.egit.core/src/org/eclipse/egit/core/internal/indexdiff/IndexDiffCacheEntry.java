@@ -106,8 +106,14 @@ public class IndexDiffCacheEntry {
 
 	private CopyOnWriteArrayList<IndexDiffChangedListener> listeners = new CopyOnWriteArrayList<>();
 
-	private final IndexChangedListener indexChangedListener = event -> refreshIndexDelta(
-			event.getFsMonitorPaths(), event.getIndexChecksum());
+	private volatile Object publicationToken;
+
+	private final IndexChangedListener indexChangedListener = event -> {
+		Object own = publicationToken;
+		if (own == null || event.getOperationToken() != own) {
+			refreshIndexDelta(event.getFsMonitorPaths(), event.getIndexChecksum());
+		}
+	};
 
 	private final RefsChangedListener refsChangedListener = event -> scheduleReloadJob(
 			"RefsChanged"); //$NON-NLS-1$
@@ -756,15 +762,28 @@ public class IndexDiffCacheEntry {
 					return previous;
 				}
 				try {
-					IndexDiffData result = scanIndexDiffDataFull(monitor,
-							jobName, repository, fsMonitor.requiresFullContentCheck() || probe != null && previous == null ? List.of("/") //$NON-NLS-1$
-									: probe != null ? probe.getChangedPaths() : List.of(),
-							untrackedOnly);
+					List<String> checkPaths;
+					if (fsMonitor.requiresFullContentCheck()
+							|| probe != null && previous == null) {
+						checkPaths = List.of("/"); //$NON-NLS-1$
+					} else if (probe != null) {
+						checkPaths = new ArrayList<>(probe.getChangedPaths());
+						if (previous != null && !untrackedOnly) {
+							// A new token cannot validate earlier dirty index entries.
+							checkPaths.addAll(previous.getModified());
+							checkPaths.addAll(previous.getMissing());
+						}
+					} else {
+						checkPaths = List.of();
+					}
+					FullScan scan = scanIndexDiffDataFull(monitor,
+							jobName, repository, checkPaths, untrackedOnly, probe, true);
+					IndexDiffData result = scan.data();
 					if (untrackedOnly && result != null) {
 						result = new IndexDiffData(previous, result);
 					}
 					if (result != null && !monitor.isCanceled()) {
-						pendingFsMonitorProbe = probe;
+						pendingFsMonitorProbe = scan.probe();
 					} else {
 						clearFsMonitor();
 					}
@@ -803,23 +822,28 @@ public class IndexDiffCacheEntry {
 	private IndexDiffData scanIndexDiffDataFull(IProgressMonitor monitor,
 			String jobName, Repository repository, List<String> checkPaths)
 			throws IOException {
-		return scanIndexDiffDataFull(monitor, jobName, repository, checkPaths, false);
+		return scanIndexDiffDataFull(monitor, jobName, repository, checkPaths, false,
+				null, true).data();
 	}
 
-	private IndexDiffData scanIndexDiffDataFull(IProgressMonitor monitor,
+	private record FullScan(IndexDiffData data, FsMonitor.Probe probe) {
+	}
+
+	private FullScan scanIndexDiffDataFull(IProgressMonitor monitor,
 			String jobName, Repository repository, List<String> checkPaths,
-			boolean untrackedOnly) throws IOException {
+			boolean untrackedOnly, FsMonitor.Probe probe, boolean allowPublication) throws IOException {
 		EclipseGitProgressTransformer jgitMonitor = new EclipseGitProgressTransformer(
 				monitor);
 
 		return UnitOfWork.run(repository, () -> {
 			WorkingTreeIterator iterator = IteratorService
 					.createInitialIterator(repository,
-							updateUntrackedCache && !reportIgnored && !untrackedOnly);
+							allowPublication && updateUntrackedCache && !reportIgnored && !untrackedOnly);
 			if (iterator == null)
-				return null; // workspace is closed
+				return new FullScan(null, null); // workspace is closed
 			IndexDiff newDiff = new IndexDiff(repository, Constants.HEAD,
 					iterator);
+			newDiff.setFsMonitorProbe(probe);
 			newDiff.setReportIgnored(reportIgnored);
 			newDiff.setForceContentCheckPaths(checkPaths);
 			if (untrackedOnly) {
@@ -838,10 +862,44 @@ public class IndexDiffCacheEntry {
 
 			newDiff.diff(jgitMonitor, 0, 0, jobName,
 					() -> RepositoryCache.INSTANCE.getBuilder(true, true));
-			if (updateUntrackedCache && !monitor.isCanceled()) {
-				newDiff.updateUntrackedCache();
+			if (allowPublication && updateUntrackedCache && !monitor.isCanceled()) {
+				Object operation = new Object();
+				publicationToken = operation;
+				try {
+					newDiff.updateUntrackedCache(operation);
+				} finally {
+					publicationToken = null;
+				}
 			}
-			return new IndexDiffData(newDiff);
+			IndexDiffData result = new IndexDiffData(newDiff);
+			FsMonitor.Publication published = newDiff.getFsMonitorPublication();
+			if (published != null && FsMonitor.isConfigured(repository)
+					&& !monitor.isCanceled() && (published.getProbe() == null
+							|| published.getLatePaths() == null || !published.getLatePaths().isEmpty())) {
+				// Own events must not cancel this producing job. Consume late
+				// work in one read-only follow-up; a broken/root-only provider
+				// must not cause a publication/refresh loop.
+				FsMonitor.Probe next = null;
+				if (FsMonitor.isEnabled(repository)) {
+					synchronized (fsMonitor) {
+						fsMonitor.remember(published.getProbe());
+						next = fsMonitor.query(repository);
+					}
+				}
+				List<String> followup;
+				if (published.getProbe() == null || published.getLatePaths() == null
+						|| next == null && FsMonitor.isEnabled(repository)) {
+					followup = List.of("/"); //$NON-NLS-1$
+				} else {
+					followup = new ArrayList<>(published.getLatePaths());
+					followup.addAll(result.getModified());
+					followup.addAll(result.getMissing());
+					if (next != null) followup.addAll(next.getChangedPaths());
+				}
+				return scanIndexDiffDataFull(monitor, jobName, repository, followup,
+						false, next, false);
+			}
+			return new FullScan(result, newDiff.getFsMonitorProbe());
 		});
 	}
 

@@ -8,6 +8,8 @@
 package org.eclipse.egit.core.internal.indexdiff;
 
 import static org.junit.Assert.assertArrayEquals;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 
@@ -39,6 +41,113 @@ public class FsMonitorInitializationOperationTest extends GitTestCase {
 	@Test
 	public void failedInitialHookRetainsNativeDirtyState() throws Exception {
 		checkFirstAdd(false, true);
+	}
+
+	@Test
+	public void firstReadOnlyRefreshWithoutFSMNChecksSameStatEdits() throws Exception {
+		checkFirstReadOnlyRefresh(false);
+	}
+
+	@Test
+	public void failedFirstQueryDoesNotHideChangesOrCreateStorage() throws Exception {
+		checkFirstReadOnlyRefresh(true);
+	}
+
+	@Test
+	public void firstUnbornRefreshPublishesInitiallyAbsentIndex() throws Exception {
+		TestRepository fixture = new TestRepository(new java.io.File(
+				project.getProject().getLocation().toFile(), ".git"));
+		IndexDiffCacheEntry cache = null;
+		try {
+			fixture.connect(project.getProject());
+			var repository = fixture.getRepository();
+			assertNull(repository.resolve(org.eclipse.jgit.lib.Constants.HEAD));
+			assertTrue(Files.notExists(repository.getIndexFile().toPath()));
+			Path hook = repository.getDirectory().toPath().resolve("hooks/bootstrap-monitor");
+			Files.createDirectories(hook.getParent());
+			Files.writeString(hook, "#!/bin/sh\nprintf 'initial-clock\\000'\n");
+			assertTrue(hook.toFile().setExecutable(true));
+			repository.getConfig().setString("core", null, "fsmonitor", hook.toString());
+			repository.getConfig().setInt("core", null, "fsmonitorHookVersion", 2);
+			repository.getConfig().setBoolean("jgit", null, "fsmonitorCache", false);
+			repository.getConfig().setBoolean("core", null, "untrackedCache", true);
+			repository.getConfig().setString("status", null, "showUntrackedFiles", "all");
+			repository.getConfig().save();
+			Files.writeString(repository.getWorkTree().toPath().resolve("loose"), "new\n");
+			var publications = new java.util.concurrent.CopyOnWriteArrayList<Boolean>();
+			var listener = repository.getListenerList().addIndexChangedListener(event -> {
+				try {
+					var untracked = repository.readDirCache().getUntrackedCache();
+					publications.add(untracked != null && untracked.root != null && untracked.root.valid);
+				} catch (java.io.IOException failure) {
+					throw new java.io.UncheckedIOException(failure);
+				}
+			});
+			try {
+				cache = new IndexDiffCacheEntry(repository, null, false, true);
+				waitForJobs();
+				assertTrue(!publications.isEmpty());
+				assertEquals(Boolean.TRUE, publications.get(0));
+			} finally {
+				listener.remove();
+			}
+			var index = repository.readDirCache();
+			assertEquals(0, index.getEntryCount());
+			assertNotNull(index.getFsMonitorCache());
+			assertTrue(index.getUntrackedCache().root.valid);
+			var nativePaths = new java.util.HashSet<String>();
+			byte[] output = NativeFsMonitorIndexSupport.status(repository, false);
+			for (String record : new String(output, java.nio.charset.StandardCharsets.UTF_8).split("\0")) {
+				if (record.startsWith("?? ")) nativePaths.add(record.substring(3));
+				else assertTrue(record, record.isEmpty() || record.startsWith("!! "));
+			}
+			assertEquals(nativePaths, cache.getIndexDiff().getUntracked());
+			assertTrue(cache.getIndexDiff().getAdded().isEmpty());
+			assertTrue(cache.getIndexDiff().getChanged().isEmpty());
+			assertTrue(cache.getIndexDiff().getRemoved().isEmpty());
+			assertTrue(cache.getIndexDiff().getModified().isEmpty());
+			assertTrue(cache.getIndexDiff().getMissing().isEmpty());
+			assertTrue(cache.getIndexDiff().getConflicting().isEmpty());
+		} finally {
+			if (cache != null) cache.dispose();
+			waitForJobs();
+			fixture.dispose();
+		}
+	}
+
+	private void checkFirstReadOnlyRefresh(boolean failedHook) throws Exception {
+		TestRepository fixture = new TestRepository(new java.io.File(
+				project.getProject().getLocation().toFile(), ".git"));
+		IndexDiffCacheEntry cache = null;
+		try {
+			fixture.connect(project.getProject());
+			var repository = fixture.getRepository();
+			NativeFsMonitorIndexSupport.prepareWithoutExtension(repository);
+			assertNull(repository.readDirCache().getFsMonitorCache());
+			byte[] original = Files.readAllBytes(repository.getIndexFile().toPath());
+			Path file = repository.getWorkTree().toPath().resolve("a");
+			var time = Files.getLastModifiedTime(file);
+			java.util.concurrent.TimeUnit.MILLISECONDS.sleep(1010 - System.currentTimeMillis() % 1000);
+			Files.writeString(file, "edit\n");
+			Files.setLastModifiedTime(file, time);
+			if (failedHook) {
+				Files.writeString(Path.of(repository.getConfig().getString("core", null, "fsmonitor")),
+						"#!/bin/sh\nexit 1\n");
+			}
+			cache = new IndexDiffCacheEntry(repository, null, false);
+			waitForJobs();
+			assertEquals(java.util.Set.of("a"), cache.getIndexDiff().getModified());
+			cache.refresh();
+			waitForJobs();
+			assertEquals(java.util.Set.of("a"), cache.getIndexDiff().getModified());
+			NativeFsMonitorWorkloadSupport.assertNativeDiff(repository, false, null, java.util.Set.of("a"));
+			assertArrayEquals(original, Files.readAllBytes(repository.getIndexFile().toPath()));
+			assertNull(repository.readDirCache().getFsMonitorCache());
+		} finally {
+			if (cache != null) cache.dispose();
+			waitForJobs();
+			fixture.dispose();
+		}
 	}
 
 	private void checkFirstAdd(boolean missingIndex, boolean failedHook)
