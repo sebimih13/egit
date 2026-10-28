@@ -777,7 +777,8 @@ public class IndexDiffCacheEntry {
 						checkPaths = List.of();
 					}
 					FullScan scan = scanIndexDiffDataFull(monitor,
-							jobName, repository, checkPaths, untrackedOnly, probe, true);
+							jobName, repository, checkPaths, untrackedOnly,
+							new FsMonitor.IndexQuery(probe, fsMonitor.requiresFullContentCheck()), true);
 					IndexDiffData result = scan.data();
 					if (untrackedOnly && result != null) {
 						result = new IndexDiffData(previous, result);
@@ -831,7 +832,7 @@ public class IndexDiffCacheEntry {
 
 	private FullScan scanIndexDiffDataFull(IProgressMonitor monitor,
 			String jobName, Repository repository, List<String> checkPaths,
-			boolean untrackedOnly, FsMonitor.Probe probe, boolean allowPublication) throws IOException {
+			boolean untrackedOnly, FsMonitor.IndexQuery query, boolean allowPublication) throws IOException {
 		EclipseGitProgressTransformer jgitMonitor = new EclipseGitProgressTransformer(
 				monitor);
 
@@ -843,7 +844,7 @@ public class IndexDiffCacheEntry {
 				return new FullScan(null, null); // workspace is closed
 			IndexDiff newDiff = new IndexDiff(repository, Constants.HEAD,
 					iterator);
-			newDiff.setFsMonitorProbe(probe);
+			newDiff.setFsMonitorQuery(query);
 			newDiff.setReportIgnored(reportIgnored);
 			newDiff.setForceContentCheckPaths(checkPaths);
 			if (untrackedOnly) {
@@ -880,10 +881,12 @@ public class IndexDiffCacheEntry {
 				// work in one read-only follow-up; a broken/root-only provider
 				// must not cause a publication/refresh loop.
 				FsMonitor.Probe next = null;
+				FsMonitor.IndexQuery nextQuery = null;
 				if (FsMonitor.isEnabled(repository)) {
 					synchronized (fsMonitor) {
 						fsMonitor.remember(published.getProbe());
 						next = fsMonitor.query(repository);
+						nextQuery = new FsMonitor.IndexQuery(next, fsMonitor.requiresFullContentCheck());
 					}
 				}
 				List<String> followup;
@@ -897,7 +900,7 @@ public class IndexDiffCacheEntry {
 					if (next != null) followup.addAll(next.getChangedPaths());
 				}
 				return scanIndexDiffDataFull(monitor, jobName, repository, followup,
-						false, next, false);
+						false, nextQuery, false);
 			}
 			return new FullScan(result, newDiff.getFsMonitorProbe());
 		});

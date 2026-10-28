@@ -191,6 +191,9 @@ public class NativeCacheIndexDiffTest extends GitTestCase {
 	private IndexDiffData fresh() throws Exception {
 		IndexDiff diff = new IndexDiff(db, Constants.HEAD,
 				new FileTreeIterator(db));
+		// This is the independent complete-scan oracle, including when the
+		// fixture deliberately omits notifications. Do not trust native FSMN.
+		diff.setFsMonitorQuery(new org.eclipse.jgit.util.FsMonitor.IndexQuery(null, true));
 		diff.diff();
 		return new IndexDiffData(diff);
 	}
