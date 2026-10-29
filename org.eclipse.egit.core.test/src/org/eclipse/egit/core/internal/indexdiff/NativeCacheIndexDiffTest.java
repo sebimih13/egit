@@ -153,7 +153,9 @@ public class NativeCacheIndexDiffTest extends GitTestCase {
 			put(dir + "tracked", "");
 			put(dir + "modified", "");
 		}
+		settleIndexRefreshes();
 		git.add().addFilepattern(".").call();
+		settleIndexRefreshes();
 		git.commit().setMessage("initial").call();
 	}
 
@@ -170,11 +172,18 @@ public class NativeCacheIndexDiffTest extends GitTestCase {
 		for (String path : List.of("one", "two", "three", "done/one",
 				"dtwo/two", "dthree/three"))
 			put(path, "");
+		settleIndexRefreshes();
 		git.add().addFilepattern("one").addFilepattern("two")
 				.addFilepattern("done/one").call();
 		Files.createDirectories(db.getDirectory().toPath().resolve("info"));
 		Files.writeString(db.getDirectory().toPath().resolve("info/exclude"),
 				"");
+	}
+
+	private void settleIndexRefreshes() throws Exception {
+		// Native scenarios run foreground commands sequentially. Optional
+		// background status writes must finish before the next index writer.
+		TestUtils.waitForJobs(10000, JobFamilies.INDEX_DIFF_CACHE_UPDATE);
 	}
 
 	private IndexDiffData scan() throws Exception {
@@ -243,8 +252,12 @@ public class NativeCacheIndexDiffTest extends GitTestCase {
 		fsmonitorFixture();
 		scan();
 		dirty();
-		for (String path : List.of("new", "dir1/new", "dir2/new"))
+		for (String path : List.of("new", "dir1/new", "dir2/new")) {
+			// Native t7519 executes these commands sequentially. Background
+			// optional index maintenance must settle before the next mutation.
+			TestUtils.waitForJobs(10000, JobFamilies.INDEX_DIFF_CACHE_UPDATE);
 			git.add().addFilepattern(path).call();
+		}
 		reply("untracked", "dir1/untracked", "dir2/untracked", "modified",
 				"dir1/modified", "dir2/modified", "new", "dir1/new",
 				"dir2/new");
@@ -320,6 +333,9 @@ public class NativeCacheIndexDiffTest extends GitTestCase {
 	@Test
 	public void metadataNotificationsPreserveImportedNativeUntrackedPayload()
 			throws Exception {
+		// This is the native --no-optional-locks preservation scenario.
+		((org.eclipse.jgit.junit.MockSystemReader) org.eclipse.jgit.util.SystemReader.getInstance())
+				.setProperty("GIT_OPTIONAL_LOCKS", "0");
 		for (String dir : List.of("", "dir1/", "dir2/")) {
 			put(dir + "tracked", "");
 			put(dir + "modified", "");
@@ -354,6 +370,7 @@ public class NativeCacheIndexDiffTest extends GitTestCase {
 		fsmonitorFixture();
 		var before = scan();
 		put("tracked", "new indexed content\n");
+		settleIndexRefreshes();
 		git.add().addFilepattern("tracked").call();
 		reply(".git", ".git/index");
 		var after = check();
@@ -377,12 +394,13 @@ public class NativeCacheIndexDiffTest extends GitTestCase {
 		entry = null;
 		put("tracked", "changed after monitoring lifetime ended\n");
 		reply();
+		int previousCalls = monitorCalls();
 		var after = check();
 		assertNotSame(before, after);
 		assertEquals(Set.of("tracked"), after.getModified());
 		var calls = Files.readAllLines(
 				db.getDirectory().toPath().resolve("native-cache-calls"));
-		assertEquals("c:0:0:0:0", calls.get(calls.size() - 1));
+		assertEquals("c:0:0:0:0", calls.get(previousCalls));
 	}
 
 	// t7519: stage/unstage 100 entries after the original six index entries.
@@ -396,10 +414,12 @@ public class NativeCacheIndexDiffTest extends GitTestCase {
 			String name = "z" + n;
 			names.add(name);
 			put(name, "");
+			settleIndexRefreshes();
 			git.add().addFilepattern(name).call();
 		}
 		reply();
 		assertEquals(names, check().getAdded());
+		settleIndexRefreshes();
 		ResetCommand reset = git.reset();
 		for (String name : names)
 			reset.addPath(name);
@@ -444,10 +464,12 @@ public class NativeCacheIndexDiffTest extends GitTestCase {
 		reply();
 		var excluded = cumulativeCheck(added, Set.of(".gitignore", "dtwo/two"));
 		assertTrue(excluded.getIgnoredNotInIndex().containsAll(Set.of("four", "three")));
+		settleIndexRefreshes();
 		git.rm().setCached(true).addFilepattern("two").call();
 		reply();
 		cumulativeCheck(Set.of("one", "done/one"),
 				Set.of(".gitignore", "dtwo/two", "two"));
+		settleIndexRefreshes();
 		git.add().addFilepattern("two").call();
 		reply();
 		cumulativeCheck(added, Set.of(".gitignore", "dtwo/two"));
@@ -455,6 +477,7 @@ public class NativeCacheIndexDiffTest extends GitTestCase {
 		put("done/two", "two\n");
 		// Fixture equivalent of native add -f; AddCommand has no force flag.
 		forceStage("done/two");
+		settleIndexRefreshes();
 		git.add().addFilepattern("done/.gitignore").call();
 		reply("done/.gitignore", "done/two");
 		var staged = cumulativeCheck(
@@ -559,12 +582,14 @@ public class NativeCacheIndexDiffTest extends GitTestCase {
 			throws Exception {
 		untrackedFixture();
 		scan();
+		settleIndexRefreshes();
 		git.rm().setCached(true).addFilepattern("two").call();
 		reply();
 		IndexDiffData removed = check();
 		assertEquals(Set.of("one", "done/one"), removed.getAdded());
 		assertEquals(Set.of("two", "three", "dtwo/two", "dthree/three"),
 				removed.getUntracked());
+		settleIndexRefreshes();
 		git.add().addFilepattern("two").call();
 		reply();
 		assertEquals(Set.of("one", "two", "done/one"), check().getAdded());
@@ -575,7 +600,9 @@ public class NativeCacheIndexDiffTest extends GitTestCase {
 			throws Exception {
 		fsmonitorFixture();
 		put(".gitignore", "*.tmp\n");
+		settleIndexRefreshes();
 		git.add().addFilepattern(".gitignore").call();
+		settleIndexRefreshes();
 		git.commit().setMessage("ignore").call();
 		put("old", "untracked");
 		put("old.tmp", "ignored");
@@ -635,8 +662,11 @@ public class NativeCacheIndexDiffTest extends GitTestCase {
 			throws Exception {
 		put("one/file", "");
 		put("two/file", "");
+		settleIndexRefreshes();
 		git.add().addFilepattern(".").call();
+		settleIndexRefreshes();
 		var first = git.commit().setMessage("first commit").call();
+		settleIndexRefreshes();
 		git.rm().addFilepattern("one/file").call();
 		Path one = db.getWorkTree().toPath().resolve("one");
 		Files.deleteIfExists(one);
@@ -645,10 +675,13 @@ public class NativeCacheIndexDiffTest extends GitTestCase {
 		} else {
 			Files.writeString(one, "");
 		}
+		settleIndexRefreshes();
 		git.add().addFilepattern("one").call();
+		settleIndexRefreshes();
 		var second = git.commit().setMessage("second commit").call();
 		scan();
 		for (var target : List.of(first, second, first, second)) {
+			settleIndexRefreshes();
 			git.checkout().setName(target.name()).call();
 			reply();
 			IndexDiffData actual = check();
@@ -671,6 +704,7 @@ public class NativeCacheIndexDiffTest extends GitTestCase {
 			throws Exception {
 		untrackedFixture();
 		scan();
+		settleIndexRefreshes();
 		git.add().addFilepattern("dtwo/two").call();
 		reply();
 		IndexDiffData staged = check();
@@ -678,6 +712,7 @@ public class NativeCacheIndexDiffTest extends GitTestCase {
 				staged.getAdded());
 		assertEquals(Set.of("three", "dthree/three"), staged.getUntracked());
 		scan();
+		settleIndexRefreshes();
 		git.rm().setCached(true).addFilepattern("dtwo/two").call();
 		reply();
 		IndexDiffData unstaged = check();
@@ -696,16 +731,20 @@ public class NativeCacheIndexDiffTest extends GitTestCase {
 		Set<String> expected = Set.of("loose", "dir1/loose");
 		var initial = db.resolve("HEAD");
 		scan();
+		settleIndexRefreshes();
 		git.checkout().setCreateBranch(true).setName("cache-transition").call();
 		reply();
 		assertEquals(expected, check().getUntracked());
 		scan();
 		put("tracked", "changed tracked content");
+		settleIndexRefreshes();
 		git.add().addFilepattern("tracked").call();
+		settleIndexRefreshes();
 		git.commit().setMessage("commit with warm cache").call();
 		reply();
 		assertEquals(expected, check().getUntracked());
 		scan();
+		settleIndexRefreshes();
 		git.checkout().setName(initial.name()).call();
 		reply();
 		assertEquals(expected, check().getUntracked());
@@ -733,12 +772,15 @@ public class NativeCacheIndexDiffTest extends GitTestCase {
 		fsmonitorFixture();
 		var original = db.resolve("HEAD");
 		dirty();
+		settleIndexRefreshes();
 		git.add().addFilepattern(".").call();
+		settleIndexRefreshes();
 		git.commit().setMessage("to reset").call();
 		reply("/");
 		scan();
 		reply();
 		scan();
+		settleIndexRefreshes();
 		git.reset().setRef(original.name()).setMode(ResetCommand.ResetType.MIXED).call();
 		reply();
 		var status = check();
@@ -768,7 +810,7 @@ public class NativeCacheIndexDiffTest extends GitTestCase {
 		put("loose", "untracked");
 		reply("loose");
 		assertEquals(Set.of("loose"), check().getUntracked());
-		assertTrue(!Files.exists(db.getIndexFile().toPath()));
+		assertEquals(untrackedCache, Files.exists(db.getIndexFile().toPath()));
 	}
 
 	// t7063 config transitions, extended through a warm monitor/cache instance.
@@ -807,7 +849,9 @@ public class NativeCacheIndexDiffTest extends GitTestCase {
 			imported.open(null);
 			fixture.connect(imported);
 			NativeFsMonitorWorkloadSupport.populate(db);
+			settleIndexRefreshes();
 			git.add().setAll(true).call();
+			settleIndexRefreshes();
 			git.commit().setAuthor("Cache Workload", "cache@example.invalid")
 					.setCommitter("Cache Workload", "cache@example.invalid")
 					.setMessage("p7519 files").call();
@@ -948,9 +992,12 @@ public class NativeCacheIndexDiffTest extends GitTestCase {
 	public void parallelSizedIndexRetainsStagedAndUnstagedCategories() throws Exception {
 		for (int n = 0; n < 1000; n++)
 			put("large/f" + n, "base\n");
+		settleIndexRefreshes();
 		git.add().addFilepattern("large").call();
+		settleIndexRefreshes();
 		git.commit().setMessage("large index").call();
 		put("large/f0", "staged\n");
+		settleIndexRefreshes();
 		git.add().addFilepattern("large/f0").call();
 		reply("/");
 		scan();
@@ -975,7 +1022,9 @@ public class NativeCacheIndexDiffTest extends GitTestCase {
 	private void largeIndexFixture() throws Exception {
 		for (int n = 0; n < 1000; n++)
 			put("flags/f" + n, "base\n");
+		settleIndexRefreshes();
 		git.add().addFilepattern("flags").call();
+		settleIndexRefreshes();
 		git.commit().setMessage("index flag fixture").call();
 	}
 
@@ -986,6 +1035,7 @@ public class NativeCacheIndexDiffTest extends GitTestCase {
 			throws Exception {
 		largeIndexFixture();
 		put("flags/f0", "staged\n");
+		settleIndexRefreshes();
 		git.add().addFilepattern("flags/f0").call();
 		nativeIndexFlag("--assume-unchanged", "flags/f0");
 		assertTrue(db.readDirCache().getEntry("flags/f0").isAssumeValid());
@@ -1017,6 +1067,7 @@ public class NativeCacheIndexDiffTest extends GitTestCase {
 			throws Exception {
 		largeIndexFixture();
 		put("flags/new", "indexed addition\n");
+		settleIndexRefreshes();
 		git.add().addFilepattern("flags/new").call();
 		nativeIndexFlag("--skip-worktree", "flags/f0", "flags/f1", "flags/new");
 		put("flags/new", "skipped addition edit\n");

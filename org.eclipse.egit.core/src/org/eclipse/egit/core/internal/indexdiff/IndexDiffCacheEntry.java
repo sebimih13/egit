@@ -23,10 +23,12 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.TreeSet;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.Semaphore;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.locks.ReentrantLock;
 
 import org.eclipse.core.resources.IProject;
@@ -74,6 +76,7 @@ import org.eclipse.jgit.treewalk.WorkingTreeIterator;
 import org.eclipse.jgit.treewalk.filter.InterIndexDiffFilter;
 import org.eclipse.jgit.treewalk.filter.PathFilterGroup;
 import org.eclipse.jgit.util.FsMonitor;
+import org.eclipse.jgit.util.SystemReader;
 import org.eclipse.jgit.util.Trace2;
 import org.eclipse.osgi.util.NLS;
 
@@ -108,9 +111,16 @@ public class IndexDiffCacheEntry {
 
 	private volatile Object publicationToken;
 
+	private final AtomicBoolean maintenanceFollowup = new AtomicBoolean();
+
 	private final IndexChangedListener indexChangedListener = event -> {
 		Object own = publicationToken;
 		if (own == null || event.getOperationToken() != own) {
+			if (event.getOperationToken() != null) {
+				// Reconcile another status publisher without echoing its write.
+				// Its notification scope is still processed below.
+				maintenanceFollowup.set(true);
+			}
 			refreshIndexDelta(event.getFsMonitorPaths(), event.getIndexChecksum());
 		}
 	};
@@ -148,6 +158,9 @@ public class IndexDiffCacheEntry {
 
 	private final boolean updateUntrackedCache;
 
+	// Guarded by fsMonitor; permission changes require a fresh full scan.
+	private String monitorOptionalLocks;
+
 	/**
 	 * @param repository
 	 * @param listener
@@ -167,12 +180,12 @@ public class IndexDiffCacheEntry {
 	 */
 	public IndexDiffCacheEntry(Repository repository,
 			@Nullable IndexDiffChangedListener listener, boolean reportIgnored) {
-		this(repository, listener, reportIgnored, false);
+		this(repository, listener, reportIgnored, true);
 	}
 
 	/**
 	 * Create a retained cache with optional native untracked-cache publication.
-	 * Publication requires complete scans without ignored reporting; unsupported
+	 * Publication requires complete scans; ignored reporting is preserved. Unsupported
 	 * configurations retain the ordinary read-only scan behavior.
 	 *
 	 * @param repository repository to observe
@@ -732,7 +745,8 @@ public class IndexDiffCacheEntry {
 		try (Trace2.Scope trace = Trace2.getInstance().command(repository,
 				"status", "egit.indexdiff.full")) { //$NON-NLS-1$ //$NON-NLS-2$
 			try {
-				IndexDiffData result = calcIndexDiffDataFullWithTrace(monitor, jobName, repository);
+				boolean allowPublication = !maintenanceFollowup.getAndSet(false);
+				IndexDiffData result = calcIndexDiffDataFullWithTrace(monitor, jobName, repository, allowPublication);
 				if (trace.isEnabled()) {
 					trace.data("outcome", monitor.isCanceled() || result == null //$NON-NLS-1$
 							? "cancelled" : "ok"); //$NON-NLS-1$ //$NON-NLS-2$
@@ -746,14 +760,17 @@ public class IndexDiffCacheEntry {
 	}
 
 	private IndexDiffData calcIndexDiffDataFullWithTrace(
-			IProgressMonitor monitor, String jobName, Repository repository)
+			IProgressMonitor monitor, String jobName, Repository repository, boolean allowPublication)
 			throws IOException {
 		if (FsMonitor.isEnabled(repository) && !monitor.isCanceled()) {
 			synchronized (fsMonitor) {
 				pendingFsMonitorProbe = null;
+				String optional = SystemReader.getInstance().getenv("GIT_OPTIONAL_LOCKS"); //$NON-NLS-1$
+				boolean permissionChanged = !Objects.equals(monitorOptionalLocks, optional);
+				monitorOptionalLocks = optional;
 				FsMonitor.Probe probe = fsMonitor.query(repository);
 				IndexDiffData previous = indexDiffData;
-				boolean unchanged = probe != null && probe.isUnchanged()
+				boolean unchanged = !permissionChanged && probe != null && probe.isUnchanged()
 						&& previous != null && !monitor.isCanceled();
 				boolean untrackedOnly = unchanged
 						&& !FsMonitor.isUntrackedCacheEnabled(repository, probe);
@@ -778,7 +795,7 @@ public class IndexDiffCacheEntry {
 					}
 					FullScan scan = scanIndexDiffDataFull(monitor,
 							jobName, repository, checkPaths, untrackedOnly,
-							new FsMonitor.IndexQuery(probe, fsMonitor.requiresFullContentCheck()), true);
+							new FsMonitor.IndexQuery(probe, fsMonitor.requiresFullContentCheck()), allowPublication);
 					IndexDiffData result = scan.data();
 					if (untrackedOnly && result != null) {
 						result = new IndexDiffData(previous, result);
@@ -796,13 +813,14 @@ public class IndexDiffCacheEntry {
 			}
 		}
 		clearFsMonitor();
-		return scanIndexDiffDataFull(monitor, jobName, repository, List.of());
+		return scanIndexDiffDataFull(monitor, jobName, repository, List.of(), false, null, allowPublication).data();
 	}
 
 	private void clearFsMonitor() {
 		synchronized (fsMonitor) {
 			fsMonitor.clear();
 			pendingFsMonitorProbe = null;
+			monitorOptionalLocks = null;
 		}
 	}
 
@@ -820,13 +838,6 @@ public class IndexDiffCacheEntry {
 		}
 	}
 
-	private IndexDiffData scanIndexDiffDataFull(IProgressMonitor monitor,
-			String jobName, Repository repository, List<String> checkPaths)
-			throws IOException {
-		return scanIndexDiffDataFull(monitor, jobName, repository, checkPaths, false,
-				null, true).data();
-	}
-
 	private record FullScan(IndexDiffData data, FsMonitor.Probe probe) {
 	}
 
@@ -839,7 +850,7 @@ public class IndexDiffCacheEntry {
 		return UnitOfWork.run(repository, () -> {
 			WorkingTreeIterator iterator = IteratorService
 					.createInitialIterator(repository,
-							allowPublication && updateUntrackedCache && !reportIgnored && !untrackedOnly);
+							allowPublication && updateUntrackedCache && !untrackedOnly);
 			if (iterator == null)
 				return new FullScan(null, null); // workspace is closed
 			IndexDiff newDiff = new IndexDiff(repository, Constants.HEAD,

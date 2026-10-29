@@ -880,6 +880,15 @@ public class FsMonitorIndexDiffCacheTest extends GitTestCase {
 				f.entry.refresh();
 				other.refresh();
 				waitForJobs();
+				// A peer publication may invalidate correlation after its
+				// incremental event was applied. Finish that revalidation first.
+				first = f.entry.getIndexDiff();
+				second = other.getIndexDiff();
+				assertNotSame(first, second);
+				equalData(first, second);
+				f.entry.refresh();
+				other.refresh();
+				waitForJobs();
 				assertSame(first, f.entry.getIndexDiff());
 				assertSame(second, other.getIndexDiff());
 			} finally {

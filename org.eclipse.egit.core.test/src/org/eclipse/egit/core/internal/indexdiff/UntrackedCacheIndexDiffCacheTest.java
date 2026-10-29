@@ -130,6 +130,9 @@ public class UntrackedCacheIndexDiffCacheTest extends GitTestCase {
 
 	@Test
 	public void nativeAllCacheSupportsRetainedNonIgnoredStatus() throws Exception {
+		// Match native --no-optional-locks: test consumption without rewriting fixtures.
+		((org.eclipse.jgit.junit.MockSystemReader) SystemReader.getInstance())
+				.setProperty("GIT_OPTIONAL_LOCKS", "0");
 		assumeFalse(SystemReader.getInstance().isWindows());
 		Path directory = Files.createTempDirectory("egit-native-untracked-");
 		TestRepository fixture = new TestRepository(directory.resolve(".git").toFile());
@@ -188,6 +191,9 @@ public class UntrackedCacheIndexDiffCacheTest extends GitTestCase {
 	@Test
 	public void nativeDirectoryListingReusePreservesIgnoredRefreshResults()
 			throws Exception {
+		// Match native --no-optional-locks: test consumption without rewriting fixtures.
+		((org.eclipse.jgit.junit.MockSystemReader) SystemReader.getInstance())
+				.setProperty("GIT_OPTIONAL_LOCKS", "0");
 		assumeFalse(SystemReader.getInstance().isWindows());
 		for (String mode : new String[] { "normal", "all" }) {
 			Path directory = Files.createTempDirectory("egit-untracked-listing-");
@@ -255,6 +261,9 @@ public class UntrackedCacheIndexDiffCacheTest extends GitTestCase {
 
 	@Test
 	public void pathCheckoutRetainsNativeIndexReplacementCache() throws Exception {
+		// Isolate checkout's index transition from optional background status writes.
+		((org.eclipse.jgit.junit.MockSystemReader) SystemReader.getInstance())
+				.setProperty("GIT_OPTIONAL_LOCKS", "0");
 		TestRepository fixture = new TestRepository(new java.io.File(
 				project.getProject().getLocation().toFile(), ".git"));
 		try {
@@ -280,6 +289,9 @@ public class UntrackedCacheIndexDiffCacheTest extends GitTestCase {
 
 	@Test
 	public void unchangedBranchCheckoutPreservesNativeCache() throws Exception {
+		// Isolate checkout's index transition from optional background status writes.
+		((org.eclipse.jgit.junit.MockSystemReader) SystemReader.getInstance())
+				.setProperty("GIT_OPTIONAL_LOCKS", "0");
 		TestRepository fixture = new TestRepository(new java.io.File(
 				project.getProject().getLocation().toFile(), ".git"));
 		try {
@@ -300,6 +312,9 @@ public class UntrackedCacheIndexDiffCacheTest extends GitTestCase {
 
 	@Test
 	public void rejectedBranchCheckoutPreservesIndexAndUserChanges() throws Exception {
+		// Isolate checkout's index transition from optional background status writes.
+		((org.eclipse.jgit.junit.MockSystemReader) SystemReader.getInstance())
+				.setProperty("GIT_OPTIONAL_LOCKS", "0");
 		TestRepository fixture = new TestRepository(new java.io.File(
 				project.getProject().getLocation().toFile(), ".git"));
 		try {
@@ -327,6 +342,9 @@ public class UntrackedCacheIndexDiffCacheTest extends GitTestCase {
 
 	@Test
 	public void branchCheckoutMatchesNativeUnpackTreeInvalidation() throws Exception {
+		// Isolate checkout's index transition from optional background status writes.
+		((org.eclipse.jgit.junit.MockSystemReader) SystemReader.getInstance())
+				.setProperty("GIT_OPTIONAL_LOCKS", "0");
 		TestRepository fixture = new TestRepository(new java.io.File(
 				project.getProject().getLocation().toFile(), ".git"));
 		try {
@@ -462,6 +480,9 @@ public class UntrackedCacheIndexDiffCacheTest extends GitTestCase {
 	@Test
 	public void originalNativeDumpCheckpointsSurviveCacheRefresh()
 			throws Exception {
+		// Match native --no-optional-locks: test consumption without rewriting fixtures.
+		((org.eclipse.jgit.junit.MockSystemReader) SystemReader.getInstance())
+				.setProperty("GIT_OPTIONAL_LOCKS", "0");
 		for (int checkpoint : NativeUntrackedCacheSnapshots.checkpoints()) {
 			Path directory = Files.createTempDirectory("egit-t7063-snapshot-");
 			TestRepository fixture = new TestRepository(
@@ -511,6 +532,9 @@ public class UntrackedCacheIndexDiffCacheTest extends GitTestCase {
 	}
 
 	private void checkNativeCache(String version, String mode) throws Exception {
+		// Match native --no-optional-locks: test consumption without rewriting fixtures.
+		((org.eclipse.jgit.junit.MockSystemReader) SystemReader.getInstance())
+				.setProperty("GIT_OPTIONAL_LOCKS", "0");
 		assumeFalse(SystemReader.getInstance().isWindows());
 		Path directory = Files.createTempDirectory("egit-untracked-interop-");
 		TestRepository fixture = new TestRepository(

@@ -26,7 +26,9 @@ import org.junit.Test;
 public class PreloadIndexDiffCacheTest extends GitTestCase {
 	@Test
 	public void defaultPreloadAndFilteredRefreshMatchNativeDiff() throws Exception {
-		TestRepository fixture = new TestRepository(gitDir);
+		// Keep Eclipse's asynchronously written workspace metadata outside the fixture.
+		TestRepository fixture = new TestRepository(new java.io.File(
+				project.getProject().getLocation().toFile(), ".git"));
 		Repository repository = fixture.getRepository();
 		IndexDiffCacheEntry entry = null;
 		try (Git git = Git.wrap(repository)) {
@@ -89,7 +91,9 @@ public class PreloadIndexDiffCacheTest extends GitTestCase {
 	@Test
 	public void fullRefreshUsesPreloadWithoutChangingResults()
 			throws Exception {
-		TestRepository fixture = new TestRepository(gitDir);
+		// Keep Eclipse's asynchronously written workspace metadata outside the fixture.
+		TestRepository fixture = new TestRepository(new java.io.File(
+				project.getProject().getLocation().toFile(), ".git"));
 		Repository repository = fixture.getRepository();
 		IndexDiffCacheEntry entry = null;
 		try (Git git = Git.wrap(repository)) {

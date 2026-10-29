@@ -27,6 +27,8 @@ import org.junit.runners.Suite;
 		FsMonitorInitializationOperationTest.class,
 		FsMonitorWriterRefreshOperationTest.class, FsMonitorCheckoutOperationTest.class,
 		UntrackedCacheIndexDiffCacheTest.class,
+		UntrackedCacheNormalPublicationOperationTest.class,
+		UntrackedCacheAutomaticPublicationOperationTest.class,
 		PreloadIndexDiffCacheTest.class, IndexSkipHashOperationTest.class,
 		NativeIndexVersionOperationTest.class })
 public class NativeCacheOptionsSuite {

@@ -163,6 +163,9 @@ public class FsMonitorWriterRefreshOperationTest extends GitTestCase {
 	}
 
 	private void checkRetainedDirtyPaths(boolean untrackedCache) throws Exception {
+		// Isolate read-only dirty-path retention from optional writer refresh.
+		((org.eclipse.jgit.junit.MockSystemReader) org.eclipse.jgit.util.SystemReader.getInstance())
+				.setProperty("GIT_OPTIONAL_LOCKS", "0");
 		TestRepository fixture = new TestRepository(new java.io.File(
 				project.getProject().getLocation().toFile(), ".git"));
 		IndexDiffCacheEntry cache = null;
