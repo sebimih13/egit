@@ -5,24 +5,27 @@
 package org.eclipse.egit.core.internal.indexdiff;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotSame;
+import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertTrue;
-import java.util.List;
-import java.util.HashSet;
-import java.util.Set;
+
 import java.nio.file.Files;
-import org.eclipse.jgit.junit.NativeUntrackedEnvironmentSupport;
-import org.eclipse.jgit.junit.NativeUntrackedNormalSupport;
-import org.junit.Test;
-import org.junit.runner.RunWith;
-import org.junit.runners.Parameterized;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
 
 import org.eclipse.egit.core.JobFamilies;
 import org.eclipse.egit.core.test.GitTestCase;
 import org.eclipse.egit.core.test.TestRepository;
 import org.eclipse.egit.core.test.TestUtils;
 import org.eclipse.jgit.junit.MockSystemReader;
-import org.eclipse.jgit.util.SystemReader;
+import org.eclipse.jgit.junit.NativeUntrackedEnvironmentSupport;
+import org.eclipse.jgit.junit.NativeUntrackedNormalSupport;
 import org.eclipse.jgit.util.FileUtils;
+import org.eclipse.jgit.util.SystemReader;
+import org.junit.Test;
+import org.junit.runner.RunWith;
+import org.junit.runners.Parameterized;
 
 @RunWith(Parameterized.class)
 public class UntrackedCacheEnvironmentOperationTest extends GitTestCase {
@@ -99,6 +102,55 @@ public class UntrackedCacheEnvironmentOperationTest extends GitTestCase {
 
 	private static void waitForJobs() throws Exception {
 		TestUtils.waitForJobs(10000, JobFamilies.INDEX_DIFF_CACHE_UPDATE);
+	}
+
+	@Test
+	public void environmentPolicyAppliesToRetainedMonitorResults()
+			throws Exception {
+		var directory = Files.createTempDirectory("egit-monitored-environment-");
+		TestRepository fixture = new TestRepository(directory.resolve(".git").toFile());
+		IndexDiffCacheEntry entry = null;
+		MockSystemReader reader = (MockSystemReader) SystemReader.getInstance();
+		String previous = reader.getenv("GIT_DISABLE_UNTRACKED_CACHE");
+		try {
+			var repository = fixture.getRepository();
+			NativeUntrackedEnvironmentSupport.prepare(repository, many);
+			NativeUntrackedEnvironmentSupport.enableQuietMonitor(repository);
+			reader.setProperty("GIT_DISABLE_UNTRACKED_CACHE", "0");
+			entry = new IndexDiffCacheEntry(repository, null);
+			waitForJobs();
+			refresh(entry);
+			refresh(entry);
+			IndexDiffData warm = entry.getIndexDiff();
+			refresh(entry);
+			assertSame(warm, entry.getIndexDiff());
+			reader.setProperty("GIT_DISABLE_UNTRACKED_CACHE", value);
+			refresh(entry);
+			if (enabled) {
+				assertSame(warm, entry.getIndexDiff());
+			} else {
+				assertNotSame(warm, entry.getIndexDiff());
+			}
+			reader.setProperty("GIT_DISABLE_UNTRACKED_CACHE", "1");
+			NativeUntrackedNormalSupport.write(repository, "dthree/later", "later\n");
+			Set<String> expected = new HashSet<>(
+					Set.of("three", "dtwo/two", "dthree/three", "dthree/later"));
+			refresh(entry);
+			check(entry.getIndexDiff(), expected);
+			assertEquals(expected, NativeUntrackedNormalSupport.nativeStatus(repository, "all", false));
+			Files.delete(repository.getWorkTree().toPath().resolve("dthree/three"));
+			expected.remove("dthree/three");
+			refresh(entry);
+			check(entry.getIndexDiff(), expected);
+			assertEquals(expected, NativeUntrackedNormalSupport.nativeStatus(repository, "all", false));
+		} finally {
+			if (entry != null)
+				entry.dispose();
+			waitForJobs();
+			reader.setProperty("GIT_DISABLE_UNTRACKED_CACHE", previous);
+			fixture.dispose();
+			FileUtils.delete(directory.toFile(), FileUtils.RECURSIVE | FileUtils.RETRY);
+		}
 	}
 
 	private static void refresh(IndexDiffCacheEntry entry) throws Exception {
