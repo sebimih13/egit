@@ -27,6 +27,7 @@ import org.eclipse.egit.core.internal.signing.GpgConfigurationException;
 import org.eclipse.egit.core.op.CommitOperation;
 import org.eclipse.egit.ui.Activator;
 import org.eclipse.egit.ui.JobFamilies;
+import org.eclipse.egit.ui.amiq.MessageDialogWithCopy;
 import org.eclipse.egit.ui.internal.UIText;
 import org.eclipse.egit.ui.internal.decorators.GitLightweightDecorator;
 import org.eclipse.egit.ui.internal.dialogs.CommitMessageComponentStateManager;
@@ -36,7 +37,6 @@ import org.eclipse.egit.ui.internal.push.PushOperationUI;
 import org.eclipse.egit.ui.internal.push.PushWizardDialog;
 import org.eclipse.egit.ui.internal.push.SimpleConfigurePushDialog;
 import org.eclipse.jface.action.IAction;
-import org.eclipse.jface.dialogs.MessageDialog;
 import org.eclipse.jface.wizard.Wizard;
 import org.eclipse.jgit.api.errors.AbortedByHookException;
 import org.eclipse.jgit.api.errors.CanceledException;
@@ -192,7 +192,7 @@ public class CommitJob extends Job {
 
 			@Override
 			public void run() {
-				MessageDialog.openWarning(PlatformUI.getWorkbench()
+				MessageDialogWithCopy.open(PlatformUI.getWorkbench()
 						.getModalDialogShellProvider().getShell(),
 						createTitle(), cause.getHookStdErr());
 			}
