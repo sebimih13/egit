@@ -39,12 +39,17 @@ import org.junit.Test;
 
 /** Opt-in full Linux checkout and actual Staging refresh measurement. */
 public class LinuxCheckoutRefreshBenchmark {
-	private static final Path PHASE = Path.of(
-			"/home/seb/Developer/JEGit/artifacts/full-checkout-refresh-20261101");
+	private Path phase;
 
 	@Test
 	public void measureCompleteCheckoutAndWorkspaceRefresh() throws Exception {
-		Path request = PHASE.resolve("egit-benchmark.properties");
+		String requestPath = System
+				.getProperty("egit.test.checkoutBenchmarkRequest");
+		assumeTrue(
+				"Set egit.test.checkoutBenchmarkRequest to explicitly run this benchmark",
+				requestPath != null);
+		Path request = Path.of(requestPath).toAbsolutePath();
+		phase = request.getParent();
 		assumeTrue("Explicit benchmark request required",
 				Files.isRegularFile(request));
 		Properties settings = new Properties();
@@ -54,11 +59,11 @@ public class LinuxCheckoutRefreshBenchmark {
 		assumeTrue("Explicit benchmark enable required",
 				Boolean.parseBoolean(settings.getProperty("enabled")));
 		Path root = Path.of(settings.getProperty("repository")).toRealPath();
-		assertEquals(PHASE.resolve("copies/linux-candidate").toRealPath(),
+		assertEquals(phase.resolve("copies/linux-candidate").toRealPath(),
 				root);
 		String label = settings.getProperty("label");
 		assertTrue(label.matches("[a-zA-Z0-9-]+"));
-		Path results = PHASE.resolve(label + ".csv");
+		Path results = phase.resolve(label + ".csv");
 		assertFalse("Keep prior benchmark evidence", Files.exists(results));
 		Properties outcome = new Properties();
 		outcome.setProperty("valid", "false");
@@ -81,14 +86,14 @@ public class LinuxCheckoutRefreshBenchmark {
 				settings.store(out, "Consumed benchmark request");
 			}
 			try (var out = Files.newOutputStream(
-					PHASE.resolve(label + "-result.properties"))) {
+					phase.resolve(label + "-result.properties"))) {
 				outcome.store(out, "Complete EGit operation measurement");
 			}
 		}
 	}
 
-	private static void runProfile(Path root, Properties settings,
-			boolean monitor, BufferedWriter output) throws Exception {
+	private void runProfile(Path root, Properties settings, boolean monitor,
+			BufferedWriter output) throws Exception {
 		String base = settings.getProperty("base");
 		String parent = settings.getProperty("parent");
 		Path gitDir = root.resolve(".git");
@@ -209,8 +214,8 @@ public class LinuxCheckoutRefreshBenchmark {
 		waitForJobs();
 	}
 
-	private static void check(Repository repository, IndexDiffData data,
-			Path root, Properties settings, String target, String prefix)
+	private void check(Repository repository, IndexDiffData data, Path root,
+			Properties settings, String target, String prefix)
 			throws Exception {
 		assertEquals(target, repository.resolve("HEAD").name());
 		assertEquals(Set.of("arch/alpha/Makefile"), data.getModified());
@@ -260,15 +265,15 @@ public class LinuxCheckoutRefreshBenchmark {
 				StandardCharsets.UTF_8);
 	}
 
-	private static byte[] nativeGit(Path root, Properties settings,
-			boolean writable, String... args) throws Exception {
+	private byte[] nativeGit(Path root, Properties settings, boolean writable,
+			String... args) throws Exception {
 		List<String> command = new ArrayList<>();
 		command.add(settings.getProperty("git"));
 		command.add("-C");
 		command.add(root.toString());
 		command.addAll(Arrays.asList(args));
-		Path out = PHASE.resolve("egit-native-output.z");
-		Path error = PHASE.resolve("egit-native-error.txt");
+		Path out = phase.resolve("egit-native-output.z");
+		Path error = phase.resolve("egit-native-error.txt");
 		ProcessBuilder builder = new ProcessBuilder(command)
 				.redirectOutput(out.toFile()).redirectError(error.toFile());
 		builder.environment().keySet().removeIf(key -> key.startsWith("GIT_"));
