@@ -26,6 +26,7 @@ import org.eclipse.jgit.api.Git;
 import org.eclipse.jgit.api.SubmoduleSyncCommand;
 import org.eclipse.jgit.api.errors.GitAPIException;
 import org.eclipse.jgit.lib.Repository;
+import org.eclipse.jgit.util.Trace2;
 import org.eclipse.team.core.TeamException;
 
 /**
@@ -60,6 +61,14 @@ public class SubmoduleSyncOperation implements IEGitOperation {
 
 	@Override
 	public void execute(final IProgressMonitor monitor) throws CoreException {
+		try (Trace2.Scope trace = Trace2.getInstance().region(null, "egit", //$NON-NLS-1$
+				"SubmoduleSyncOperation")) { //$NON-NLS-1$
+			executeWithTrace(monitor);
+		}
+	}
+
+	private void executeWithTrace(final IProgressMonitor monitor)
+			throws CoreException {
 		IWorkspaceRunnable action = new IWorkspaceRunnable() {
 
 			@Override

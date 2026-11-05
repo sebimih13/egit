@@ -19,6 +19,7 @@ import org.eclipse.jgit.api.Git;
 import org.eclipse.jgit.lib.Repository;
 import org.eclipse.jgit.transport.RefSpec;
 import org.eclipse.jgit.transport.RemoteConfig;
+import org.eclipse.jgit.util.Trace2;
 import org.eclipse.osgi.util.NLS;
 
 /**
@@ -46,6 +47,14 @@ public class ConfigureFetchAfterCloneTask implements PostCloneTask {
 	 */
 	@Override
 	public void execute(Repository repository, IProgressMonitor monitor)
+			throws CoreException {
+		try (Trace2.Scope trace = Trace2.getInstance().region(null, "egit", //$NON-NLS-1$
+				"ConfigureFetchAfterCloneTask")) { //$NON-NLS-1$
+			executeWithTrace(repository, monitor);
+		}
+	}
+
+	private void executeWithTrace(Repository repository, IProgressMonitor monitor)
 			throws CoreException {
 		try (Git git = new Git(repository)) {
 			RemoteConfig configToUse = new RemoteConfig(repository.getConfig(),

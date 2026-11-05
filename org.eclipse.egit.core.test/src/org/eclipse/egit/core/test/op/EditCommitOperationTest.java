@@ -14,6 +14,7 @@ package org.eclipse.egit.core.test.op;
 
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNull;
 
 import java.io.File;
 import java.util.List;
@@ -70,6 +71,8 @@ public class EditCommitOperationTest extends GitTestCase {
 
 	@Test
 	public void edit() throws Exception {
+		// Rebase must accept a parent whose commit body has not been loaded.
+		assertNull(firstCommit.getParent(0).getRawBuffer());
 		EditCommitOperation op = new EditCommitOperation(
 				testRepository.getRepository(), firstCommit);
 		op.execute(new NullProgressMonitor());

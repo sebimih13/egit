@@ -30,6 +30,7 @@ import org.eclipse.egit.core.Activator;
 import org.eclipse.egit.core.EclipseGitProgressTransformer;
 import org.eclipse.egit.core.internal.CoreText;
 import org.eclipse.jgit.api.Git;
+import org.eclipse.jgit.api.PushCommand;
 import org.eclipse.jgit.api.errors.JGitInternalException;
 import org.eclipse.jgit.lib.Config;
 import org.eclipse.jgit.lib.ConfigConstants;
@@ -37,6 +38,7 @@ import org.eclipse.jgit.lib.Constants;
 import org.eclipse.jgit.lib.ObjectId;
 import org.eclipse.jgit.lib.Repository;
 import org.eclipse.jgit.transport.CredentialsProvider;
+import org.eclipse.jgit.transport.PushConfig.PushDefault;
 import org.eclipse.jgit.transport.PushResult;
 import org.eclipse.jgit.transport.RemoteConfig;
 import org.eclipse.jgit.transport.RemoteRefUpdate;
@@ -44,6 +46,7 @@ import org.eclipse.jgit.transport.RemoteRefUpdate.Status;
 import org.eclipse.jgit.transport.Transport;
 import org.eclipse.jgit.transport.URIish;
 import org.eclipse.jgit.util.SystemReader;
+import org.eclipse.jgit.util.Trace2;
 import org.eclipse.osgi.util.NLS;
 
 /**
@@ -52,6 +55,8 @@ import org.eclipse.osgi.util.NLS;
 public class PushOperation {
 
 	private final Repository localDb;
+
+	private boolean noVerify;
 
 	private final PushOperationSpecification specification;
 
@@ -120,8 +125,7 @@ public class PushOperation {
 	 * @return the {@link RemoteConfig}, or {@code null} if nothing is
 	 *         configured
 	 */
-	public static RemoteConfig getRemote(String branch,
-			Config config) {
+	public static RemoteConfig getRemote(String branch, Config config) {
 		if (branch == null) {
 			return null;
 		}
@@ -171,7 +175,8 @@ public class PushOperation {
 	/**
 	 * @param credentialsProvider
 	 */
-	public void setCredentialsProvider(CredentialsProvider credentialsProvider) {
+	public void setCredentialsProvider(
+			CredentialsProvider credentialsProvider) {
 		this.credentialsProvider = credentialsProvider;
 	}
 
@@ -200,6 +205,17 @@ public class PushOperation {
 	}
 
 	/**
+	 * Bypass the local pre-push hook. Server-side hooks still run.
+	 *
+	 * @param noVerify
+	 *            whether to bypass the pre-push hook
+	 * @since 7.3
+	 */
+	public void setNoVerify(boolean noVerify) {
+		this.noVerify = noVerify;
+	}
+
+	/**
 	 * @param actMonitor
 	 *            may be <code>null</code> if progress monitoring is not desired
 	 * @throws InvocationTargetException
@@ -207,6 +223,14 @@ public class PushOperation {
 	 *             {@link #getOperationResult()})
 	 */
 	public void run(IProgressMonitor actMonitor)
+			throws InvocationTargetException {
+		try (Trace2.Scope trace = Trace2.getInstance().region(null, "egit", //$NON-NLS-1$
+				"PushOperation")) { //$NON-NLS-1$
+			runWithTrace(actMonitor);
+		}
+	}
+
+	private void runWithTrace(IProgressMonitor actMonitor)
 			throws InvocationTargetException {
 
 		if (operationResult != null)
@@ -255,6 +279,7 @@ public class PushOperation {
 
 					try (Transport transport = Transport.open(localDb, uri)) {
 						transport.setDryRun(dryRun);
+						transport.setRunPrePushHook(!noVerify);
 						transport.setTimeout(timeout);
 						if (credentialsProvider != null) {
 							transport.setCredentialsProvider(
@@ -262,8 +287,10 @@ public class PushOperation {
 						}
 						try (ByteArrayOutputStream hookOutBytes = new ByteArrayOutputStream();
 								ByteArrayOutputStream hookErrBytes = new ByteArrayOutputStream();
-								PrintStream stdout = new PrintStream(hookOutBytes, true, hookCharset);
-								PrintStream stderr = new PrintStream(hookErrBytes, true, hookCharset)) {
+								PrintStream stdout = new PrintStream(
+										hookOutBytes, true, hookCharset);
+								PrintStream stderr = new PrintStream(
+										hookErrBytes, true, hookCharset)) {
 							transport.setHookOutputStream(stdout);
 							transport.setHookErrorStream(stderr);
 							PushResult result = transport.push(gitSubMonitor,
@@ -283,7 +310,8 @@ public class PushOperation {
 						}
 					} catch (JGitInternalException e) {
 						String errorMessage = e.getCause() != null
-								? e.getCause().getMessage() : e.getMessage();
+								? e.getCause().getMessage()
+								: e.getMessage();
 						String userMessage = NLS.bind(
 								CoreText.PushOperation_InternalExceptionOccurredMessage,
 								errorMessage);
@@ -295,6 +323,7 @@ public class PushOperation {
 				operationResult.setHookOutput(allHookOutputs.toString(),
 						allHookErrors.toString());
 			} else {
+				PushCommand pushCommand = git.push().setRemote(remoteName);
 				final EclipseGitProgressTransformer gitMonitor = new EclipseGitProgressTransformer(
 						progress.newChild(totalWork));
 				try (ByteArrayOutputStream hookOutBytes = new ByteArrayOutputStream();
@@ -303,16 +332,16 @@ public class PushOperation {
 								hookCharset);
 						PrintStream stderr = new PrintStream(hookErrBytes, true,
 								hookCharset)) {
-					Iterable<PushResult> results = git.push()
-							.setRemote(remoteName)
-							.setDryRun(dryRun)
-							.setTimeout(timeout)
+					Iterable<PushResult> results = pushCommand
+							.setNoVerify(noVerify)
+							.setPushDefault(localDb.getConfig().getString("push", //$NON-NLS-1$
+									null, "default") == null ? PushDefault.CURRENT //$NON-NLS-1$
+											: null)
+							.setDryRun(dryRun).setTimeout(timeout)
 							.setProgressMonitor(gitMonitor)
 							.setCredentialsProvider(credentialsProvider)
-							.setOutputStream(out)
-							.setHookOutputStream(stdout)
-							.setHookErrorStream(stderr)
-							.call();
+							.setOutputStream(out).setHookOutputStream(stdout)
+							.setHookErrorStream(stderr).call();
 					stdout.flush();
 					stderr.flush();
 					operationResult.setHookOutput(
@@ -324,14 +353,17 @@ public class PushOperation {
 					}
 				} catch (JGitInternalException e) {
 					String errorMessage = e.getCause() != null
-							? e.getCause().getMessage() : e.getMessage();
+							? e.getCause().getMessage()
+							: e.getMessage();
 					String userMessage = NLS.bind(
 							CoreText.PushOperation_InternalExceptionOccurredMessage,
 							errorMessage);
-					URIish uri = getPushURIForErrorHandling();
+					URIish uri = getPushURIForErrorHandling(
+							pushCommand.getRemote());
 					handleException(uri, e, userMessage);
 				} catch (Exception e) {
-					URIish uri = getPushURIForErrorHandling();
+					URIish uri = getPushURIForErrorHandling(
+							pushCommand.getRemote());
 					handleException(uri, e, e.getMessage());
 				}
 			}
@@ -365,12 +397,17 @@ public class PushOperation {
 		Activator.logError(userMessageForUri, e);
 	}
 
-	private URIish getPushURIForErrorHandling() {
-		RemoteConfig rc = null;
+	private URIish getPushURIForErrorHandling(String actualRemote) {
+		if (actualRemote == null) {
+			return null;
+		}
 		try {
-			rc = new RemoteConfig(localDb.getConfig(), remoteName);
-			return rc.getPushURIs().isEmpty() ? rc.getURIs().get(0) : rc
-					.getPushURIs().get(0);
+			RemoteConfig config = new RemoteConfig(localDb.getConfig(),
+					actualRemote);
+			List<URIish> uris = config.getPushURIs().isEmpty()
+					? config.getURIs()
+					: config.getPushURIs();
+			return uris.isEmpty() ? new URIish(actualRemote) : uris.get(0);
 		} catch (URISyntaxException e) {
 			// should not happen
 			Activator.logError("Reading RemoteConfig failed", e); //$NON-NLS-1$

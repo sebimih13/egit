@@ -54,6 +54,7 @@ import org.eclipse.jgit.lib.ObjectId;
 import org.eclipse.jgit.lib.Ref;
 import org.eclipse.jgit.lib.Repository;
 import org.eclipse.jgit.merge.MergeStrategy;
+import org.eclipse.jgit.util.Trace2;
 import org.eclipse.osgi.util.NLS;
 import org.eclipse.team.core.TeamException;
 
@@ -74,6 +75,8 @@ public class MergeOperation implements IEGitOperation {
 	private FastForwardMode fastForwardMode;
 
 	private Boolean commit;
+
+	private boolean noVerify;
 
 	private MergeResult mergeResult;
 
@@ -140,6 +143,17 @@ public class MergeOperation implements IEGitOperation {
 	}
 
 	/**
+	 * Bypass pre-merge-commit and commit-msg verification.
+	 *
+	 * @param noVerify
+	 *            whether to bypass verification
+	 * @since 7.3
+	 */
+	public void setNoVerify(boolean noVerify) {
+		this.noVerify = noVerify;
+	}
+
+	/**
 	 * Set the commit message to be used for the merge commit (in case one is
 	 * created)
 	 *
@@ -152,6 +166,14 @@ public class MergeOperation implements IEGitOperation {
 
 	@Override
 	public void execute(IProgressMonitor m) throws CoreException {
+		try (Trace2.Scope trace = Trace2.getInstance().region(null, "egit", //$NON-NLS-1$
+				"MergeOperation")) { //$NON-NLS-1$
+			executeWithTrace(m);
+		}
+	}
+
+	private void executeWithTrace(IProgressMonitor m)
+			throws CoreException {
 		if (mergeResult != null)
 			throw new CoreException(new Status(IStatus.ERROR, Activator
 					.PLUGIN_ID, CoreText.OperationAlreadyExecuted));
@@ -193,6 +215,7 @@ public class MergeOperation implements IEGitOperation {
 							ConfigConstants.CONFIG_KEY_CREATECHANGEID, false)) {
 						merge.setInsertChangeId(true);
 					}
+					merge.setNoVerify(noVerify);
 					mergeResult = merge.call();
 					if (MergeResult.MergeStatus.NOT_SUPPORTED
 							.equals(mergeResult.getMergeStatus())) {

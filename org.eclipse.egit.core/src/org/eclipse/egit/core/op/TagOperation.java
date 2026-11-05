@@ -30,6 +30,7 @@ import org.eclipse.jgit.lib.RefUpdate;
 import org.eclipse.jgit.lib.Repository;
 import org.eclipse.jgit.revwalk.RevCommit;
 import org.eclipse.jgit.transport.CredentialsProvider;
+import org.eclipse.jgit.util.Trace2;
 import org.eclipse.team.core.TeamException;
 
 /**
@@ -279,6 +280,14 @@ public class TagOperation implements IEGitOperation {
 
 	@Override
 	public void execute(IProgressMonitor monitor) throws CoreException {
+		try (Trace2.Scope trace = Trace2.getInstance().region(null, "egit", //$NON-NLS-1$
+				"TagOperation")) { //$NON-NLS-1$
+			executeWithTrace(monitor);
+		}
+	}
+
+	private void executeWithTrace(IProgressMonitor monitor)
+			throws CoreException {
 		SubMonitor progress = SubMonitor.convert(monitor, 1);
 		progress.setTaskName(MessageFormat
 				.format(CoreText.TagOperation_performingTagging, getName()));

@@ -23,6 +23,7 @@ import org.eclipse.core.runtime.jobs.ISchedulingRule;
 import org.eclipse.core.runtime.jobs.MultiRule;
 import org.eclipse.egit.core.internal.CoreText;
 import org.eclipse.egit.core.internal.trace.GitTraceLocation;
+import org.eclipse.jgit.util.Trace2;
 import org.eclipse.team.core.RepositoryProvider;
 
 /**
@@ -48,6 +49,14 @@ public class DisconnectProviderOperation implements IEGitOperation {
 
 	@Override
 	public void execute(IProgressMonitor m) throws CoreException {
+		try (Trace2.Scope trace = Trace2.getInstance().region(null, "egit", //$NON-NLS-1$
+				"DisconnectProviderOperation")) { //$NON-NLS-1$
+			executeWithTrace(m);
+		}
+	}
+
+	private void executeWithTrace(IProgressMonitor m)
+			throws CoreException {
 
 		SubMonitor progress = SubMonitor.convert(m,
 				CoreText.DisconnectProviderOperation_disconnecting,

@@ -19,6 +19,7 @@ import org.eclipse.egit.core.Activator;
 import org.eclipse.egit.core.op.CloneOperation.PostCloneTask;
 import org.eclipse.jgit.lib.ConfigConstants;
 import org.eclipse.jgit.lib.Repository;
+import org.eclipse.jgit.util.Trace2;
 
 /**
  * Sets the config property gerrit.createchangeid
@@ -36,6 +37,14 @@ public class SetChangeIdTask implements PostCloneTask {
 
 	@Override
 	public void execute(Repository repository, IProgressMonitor monitor)
+			throws CoreException {
+		try (Trace2.Scope trace = Trace2.getInstance().region(null, "egit", //$NON-NLS-1$
+				"SetChangeIdTask")) { //$NON-NLS-1$
+			executeWithTrace(repository, monitor);
+		}
+	}
+
+	private void executeWithTrace(Repository repository, IProgressMonitor monitor)
 			throws CoreException {
 		try {
 			repository.getConfig().setBoolean(ConfigConstants.CONFIG_GERRIT_SECTION,

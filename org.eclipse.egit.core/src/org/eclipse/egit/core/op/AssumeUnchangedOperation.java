@@ -35,6 +35,7 @@ import org.eclipse.egit.core.project.RepositoryMapping;
 import org.eclipse.jgit.dircache.DirCache;
 import org.eclipse.jgit.dircache.DirCacheEntry;
 import org.eclipse.jgit.lib.Repository;
+import org.eclipse.jgit.util.Trace2;
 import org.eclipse.osgi.util.NLS;
 
 /**
@@ -94,6 +95,14 @@ public class AssumeUnchangedOperation implements IEGitOperation {
 
 	@Override
 	public void execute(IProgressMonitor monitor) throws CoreException {
+		try (Trace2.Scope trace = Trace2.getInstance().region(null, "egit", //$NON-NLS-1$
+				"AssumeUnchangedOperation")) { //$NON-NLS-1$
+			executeWithTrace(monitor);
+		}
+	}
+
+	private void executeWithTrace(IProgressMonitor monitor)
+			throws CoreException {
 		SubMonitor progress = SubMonitor.convert(monitor, (rsrcList.size() + locations.size()) * 2);
 		progress.setTaskName(CoreText.AssumeUnchangedOperation_adding);
 

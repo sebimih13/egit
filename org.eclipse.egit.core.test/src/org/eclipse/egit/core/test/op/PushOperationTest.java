@@ -288,6 +288,11 @@ public class PushOperationTest extends DualRepositoryTestCase {
 
 	@Test
 	public void testUpdateTrackingBranchIfSpecifiedInRemoteRefUpdate() throws Exception {
+		// This tracking-ref fixture intentionally pushes into the target HEAD.
+		// Permit a ref-only update explicitly, as native Git requires.
+		repository1.getRepository().getConfig().setString("receive", null,
+				"denyCurrentBranch", "ignore");
+		repository1.getRepository().getConfig().save();
 		// Commit on repository 2
 		IProject project = importProject(repository2, projectName);
 		RevCommit commit = repository2.addAndCommit(project, new File(workdir2, "test.txt"), "Commit in repository 2");
@@ -309,6 +314,8 @@ public class PushOperationTest extends DualRepositoryTestCase {
 
 		PushOperationResult result = push.getOperationResult();
 		PushResult pushResult = result.getPushResult(remote);
+		assertEquals(RemoteRefUpdate.Status.OK,
+				pushResult.getRemoteUpdate("refs/heads/master").getStatus());
 		assertNotNull("Expected result to have tracking ref update", pushResult.getTrackingRefUpdate(trackingRef));
 
 		ObjectId trackingId = repository2.getRepository().resolve(trackingRef);

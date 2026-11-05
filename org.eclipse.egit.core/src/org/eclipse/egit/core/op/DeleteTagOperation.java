@@ -20,6 +20,7 @@ import org.eclipse.egit.core.internal.CoreText;
 import org.eclipse.jgit.api.Git;
 import org.eclipse.jgit.api.errors.GitAPIException;
 import org.eclipse.jgit.lib.Repository;
+import org.eclipse.jgit.util.Trace2;
 
 /**
  * Operation that deletes a tag
@@ -43,6 +44,14 @@ public class DeleteTagOperation implements IEGitOperation {
 
 	@Override
 	public void execute(IProgressMonitor monitor) throws CoreException {
+		try (Trace2.Scope trace = Trace2.getInstance().region(null, "egit", //$NON-NLS-1$
+				"DeleteTagOperation")) { //$NON-NLS-1$
+			executeWithTrace(monitor);
+		}
+	}
+
+	private void executeWithTrace(IProgressMonitor monitor)
+			throws CoreException {
 		try {
 			Git.wrap(repository).tagDelete().setTags(tag).call();
 		} catch (GitAPIException e) {

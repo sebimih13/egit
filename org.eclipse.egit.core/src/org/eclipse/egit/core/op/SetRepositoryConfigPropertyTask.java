@@ -17,6 +17,7 @@ import org.eclipse.core.runtime.IProgressMonitor;
 import org.eclipse.egit.core.Activator;
 import org.eclipse.egit.core.op.CloneOperation.PostCloneTask;
 import org.eclipse.jgit.lib.Repository;
+import org.eclipse.jgit.util.Trace2;
 
 /**
  * Sets config properties for a repository
@@ -43,6 +44,14 @@ public class SetRepositoryConfigPropertyTask implements PostCloneTask {
 
 	@Override
 	public void execute(Repository repository, IProgressMonitor monitor)
+			throws CoreException {
+		try (Trace2.Scope trace = Trace2.getInstance().region(null, "egit", //$NON-NLS-1$
+				"SetRepositoryConfigPropertyTask")) { //$NON-NLS-1$
+			executeWithTrace(repository, monitor);
+		}
+	}
+
+	private void executeWithTrace(Repository repository, IProgressMonitor monitor)
 			throws CoreException {
 		try {
 			repository.getConfig().setString(section, subsection, name, value);

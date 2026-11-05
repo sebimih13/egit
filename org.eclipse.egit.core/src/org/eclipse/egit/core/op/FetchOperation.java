@@ -26,6 +26,7 @@ import org.eclipse.jgit.transport.RefSpec;
 import org.eclipse.jgit.transport.RemoteConfig;
 import org.eclipse.jgit.transport.TagOpt;
 import org.eclipse.jgit.transport.URIish;
+import org.eclipse.jgit.util.Trace2;
 
 /**
  * Used to fetch from another Repository
@@ -113,6 +114,13 @@ public class FetchOperation {
 	 * @throws InvocationTargetException
 	 */
 	public void run(IProgressMonitor monitor) throws InvocationTargetException {
+		try (Trace2.Scope trace = Trace2.getInstance().region(null, "egit", //$NON-NLS-1$
+				"FetchOperation")) { //$NON-NLS-1$
+			runWithTrace(monitor);
+		}
+	}
+
+	private void runWithTrace(IProgressMonitor monitor) throws InvocationTargetException {
 		if (operationResult != null)
 			throw new IllegalStateException(CoreText.OperationAlreadyExecuted);
 
